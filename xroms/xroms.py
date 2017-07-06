@@ -7,7 +7,12 @@ import dask.array as dsar
 
 __all__ = ["sig2z"]
 
-def sig2z(da, zr, zi, dimz=None, nvar=None):
+def _interpolate(x,y,xnew):
+    f = naiso.interp1d(x,y,
+                    fill_value='extrapolate')
+    return f(xnew)[::-1]
+
+def sig2z(da, zr, zi, nvar=None):
     """
     Interpolate variables on \sigma coordinates onto z coordinates.
 
@@ -34,23 +39,21 @@ def sig2z(da, zr, zi, dimz=None, nvar=None):
     if zr.ndim > da.ndim:
         raise ValueError("`da` should have the same or more dimensions than `zr`")
 
-    if dimz == None:
-        dimz = zr.dims
     dimd = da.dims
     N = da.shape
     nzi = len(zi)
     if len(N) == 4:
-        dai = np.empty((N[0],nzi,N[2],N[3]))
-        dim = [dimd[0],'z',dimd[1],dimd[2]]
+        dai = np.empty((N[0],nzi,N[-2],N[-1]))
+        dim = [dimd[0],'z',dimd[-2],dimd[-1]]
         coord = {dimd[0]:da.coords[dimd[0]],
-                'z':zi, dimd[1]:da.coords[dimd[1]],
-                dimd[2]:da.coords[dimd[2]]
+                'z':zi, dimd[-2]:da.coords[dimd[-2]],
+                dimd[-1]:da.coords[dimd[-1]]
                 }
     elif len(N) == 3:
-        dai = np.empty((nzi,N[1],N[2]))
-        dim = ['z',dimd[1],dimd[2]]
-        coord = {'z':zi, dimd[1]:da.coords[dimd[1]],
-                dimd[2]:da.coords[dimd[2]]
+        dai = np.empty((nzi,N[-2],N[-1]))
+        dim = ['z',dimd[-2],dimd[-1]]
+        coord = {'z':zi, dimd[-2]:da.coords[dimd[-2]],
+                dimd[-1]:da.coords[dimd[-1]]
                 }
     else:
         raise ValueError("The data should at least have three dimensions")
@@ -72,19 +75,19 @@ def sig2z(da, zr, zi, dimz=None, nvar=None):
     for i in range(N[-1]):
         for j in range(N[-2]):
             # only bother for sufficiently deep regions
-            if zl[:,j,i].values.min() < -5e2:
+            if zl[:,j,i].values.min() < -1e2:
                 # only interp on z above topo
                 ind = np.argwhere(zi >= zl[:,j,i].values.min())
                 if len(N) == 4:
                     for s in range(N[0]):
                         dal = da[s,:,j,i].values
-                        f = naiso.interp1d(zl[:,j,i].values, dal,
-                                        fill_value='extrapolate')
-                        dai[s,:len(ind),j,i] = f(zi[int(ind[0]):])[::-1]
+                        dai[s,:len(ind),j,i] = _interpolate(zl[:,j,i].values,
+                                                            dal,
+                                                            zi[int(ind[0]):])
                 else:
                     dal = da[:,j,i].values
-                    f = naiso.interp1d(zl[:,j,i].values, dal,
-                                    fill_value='extrapolate')
-                    dai[:len(ind),j,i] = f(zi[int(ind[0]):])[::-1]
+                    dai[:len(ind),j,i] = _interpolate(zl[:,j,i].values,
+                                                     dal,
+                                                     zi[int(ind[0]):])
 
     return xr.DataArray(dai, dims=dim, coords=coord)
