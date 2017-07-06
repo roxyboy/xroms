@@ -46,8 +46,8 @@ def sig2z(da, zr, zi, nvar='u'):
         raise ValueError("The data should at least have three dimensions")
     dai[:] = np.nan
 
-    for i in range(nx):
-        for j in range(ny):
+    for i in range(N[-1]):
+        for j in range(N[-2]):
             if nvar=='u':  # u variables
                 zl = np.squeeze(.5*(zr[:,j+1,i+1]+zr[:,j+1,i]))
             elif nvar=='v': # v variables
