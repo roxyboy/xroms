@@ -15,7 +15,7 @@ def sig2z(da, zr, zi, nvar='u'):
     ----------
     da : `xarray.DataArray`
         The data on sigma coordinates to be interpolated
-    zr : `numpy.array`
+    zr : `xarray.DataArray`
         The depths corresponding to sigma layers
     zi : `numpy.array`
         The depths which to interpolate the data on
@@ -49,17 +49,21 @@ def sig2z(da, zr, zi, nvar='u'):
     for i in range(N[-1]):
         for j in range(N[-2]):
             if nvar=='u':  # u variables
-                zl = np.squeeze(.5*(zr[:,j+1,i+1]+zr[:,j+1,i]))
+                zl = np.squeeze(.5*(zr.roll(eta_rho=-1,xi_rho=-1)[:,j,i]
+                                    +zr.roll(eta_rho=-1)[:,j,i])
+                                )
             elif nvar=='v': # v variables
-                zl = np.squeeze(.5*(zr[:,j,i+1]+zr[j+1,i+1,:]))
+                zl = np.squeeze(.5*(zr.roll(xi_rho=-1)[:,j,i]
+                                    +zr.roll(eta_rho=-1,xi_rho=-1)[:,j,i])
+                                )
             else:
                 zl = np.squeeze(zr[:,j,i])
 
             if zl.min() < -5e2: # only bother for sufficiently deep regions
                 ind = np.argwhere(zi >= zl.min()) # only interp on z above topo
                 for s in range(nt):
-                    dal = np.squeeze(da[s,j,i,:])
+                    dal = np.squeeze(da[s,:,j,i])
                     f = naiso.interp1d(zl, dal, fill_values='extrapolate')
-                    dai[s,0:length(ind),j,i] = f(zi[int(ind[0]):])
+                    dai[s,:length(ind),j,i] = f(zi[int(ind[0]):])
 
     return xr.DataArray(dai, dims=dim, coords=coord)
