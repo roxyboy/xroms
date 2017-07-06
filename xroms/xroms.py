@@ -28,6 +28,8 @@ def sig2z(da, zr, zi, nvar='u'):
         The data interpolated onto a spatial uniform z coordinate
     """
     nzi = len(zi)
+    if np.diff(zi)[0] < 0. or zi.max() < 0.:
+        raise ValueError("The values in `zi` should be postive and increasing.")
     N = da.shape
     if len(N) == 4:
         dai = np.empty((N[0],nzi,N[2],N[3]))
@@ -38,32 +40,39 @@ def sig2z(da, zr, zi, nvar='u'):
                 }
     elif len(N) == 3:
         dai = np.empty((nzi,N[1],N[2]))
-        dim = ['z',da.dims[2],da.dims[3]]
-        coord = {'z':zi,da.dims[2]:da.coords[da.dims[2]],
-                da.dims[3]:da.coords[da.dims[3]]
+        dim = ['z',da.dims[1]],da.dims[2]]
+        coord = {'z':zi, da.dims[1]:da.coords[da.dims[1]],
+                da.dims[2]:da.coords[da.dims[2]]
                 }
     else:
         raise ValueError("The data should at least have three dimensions")
     dai[:] = np.nan
+    zi = -zi[::-1] # ROMS has deepest level at index=1
 
     for i in range(N[-1]):
         for j in range(N[-2]):
             if nvar=='u':  # u variables
-                zl = np.squeeze(.5*(zr.roll(eta_rho=-1,xi_rho=-1)[:,j,i]
-                                    +zr.roll(eta_rho=-1)[:,j,i])
+                zl = np.squeeze(.5*(zr.roll(eta_rho=-1,xi_rho=-1)[:,j,i].values
+                                    +zr.roll(eta_rho=-1)[:,j,i].values)
                                 )
             elif nvar=='v': # v variables
-                zl = np.squeeze(.5*(zr.roll(xi_rho=-1)[:,j,i]
-                                    +zr.roll(eta_rho=-1,xi_rho=-1)[:,j,i])
+                zl = np.squeeze(.5*(zr.roll(xi_rho=-1)[:,j,i].values
+                                    +zr.roll(eta_rho=-1,
+                                            xi_rho=-1)[:,j,i].values)
                                 )
             else:
-                zl = np.squeeze(zr[:,j,i])
+                zl = np.squeeze(zr[:,j,i].values)
 
             if zl.min() < -5e2: # only bother for sufficiently deep regions
                 ind = np.argwhere(zi >= zl.min()) # only interp on z above topo
-                for s in range(nt):
-                    dal = np.squeeze(da[s,:,j,i])
+                if len(N) == 4:
+                    for s in range(N[0]):
+                        dal = np.squeeze(da[s,:,j,i])
+                        f = naiso.interp1d(zl, dal, fill_values='extrapolate')
+                        dai[s,:length(ind),j,i] = f(zi[int(ind[0]):])[::-1]
+                else:
+                    dal = np.squeeze(da[:,j,i])
                     f = naiso.interp1d(zl, dal, fill_values='extrapolate')
-                    dai[s,:length(ind),j,i] = f(zi[int(ind[0]):])
+                    dai[:length(ind),j,i] = f(zi[int(ind[0]):])[::-1]
 
     return xr.DataArray(dai, dims=dim, coords=coord)
