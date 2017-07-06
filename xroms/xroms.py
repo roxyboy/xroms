@@ -40,7 +40,7 @@ def sig2z(da, zr, zi, nvar='u'):
                 }
     elif len(N) == 3:
         dai = np.empty((nzi,N[1],N[2]))
-        dim = ['z',da.dims[1]],da.dims[2]]
+        dim = ['z',da.dims[1],da.dims[2]]
         coord = {'z':zi, da.dims[1]:da.coords[da.dims[1]],
                 da.dims[2]:da.coords[da.dims[2]]
                 }
