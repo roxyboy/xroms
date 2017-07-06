@@ -29,7 +29,21 @@ def sig2z(da, zr, zi, nvar='u'):
     """
     nzi = len(zi)
     N = da.shape
-    dai = np.empty((nt,nzi,ny,nx))
+    if len(N) == 4:
+        dai = np.empty((N[0],nzi,N[2],N[3]))
+        dim = [da.dims[0],'z',da.dims[2],da.dims[3]]
+        coord = {da.dims[0]:da.coords[da.dims[0]],
+                'z':zi, da.dims[2]:da.coords[da.dims[2]],
+                da.dims[3]:da.coords[da.dims[3]]
+                }
+    elif len(N) == 3:
+        dai = np.empty((nzi,N[1],N[2]))
+        dim = ['z',da.dims[2],da.dims[3]]
+        coord = {'z':zi,da.dims[2]:da.coords[da.dims[2]],
+                da.dims[3]:da.coords[da.dims[3]]
+                }
+    else:
+        raise ValueError("The data should at least have three dimensions")
     dai[:] = np.nan
 
     for i in range(nx):
@@ -48,7 +62,4 @@ def sig2z(da, zr, zi, nvar='u'):
                     f = naiso.interp1d(zl, dal, fill_values='extrapolate')
                     dai[s,0:length(ind),j,i] = f(zi[int(ind[0]):])
 
-    return xr.DataArray(dai, dims=[da.dims[0],'z',da.dims[2],da.dims[3]],
-                        coords={da.dims[0]:da.coords[da.dims[0]],
-                                'z':zi,da.dims[2]:da.coords[da.dims[2]],
-                                da.dims[3]:da.coords[da.dims[3]]})
+    return xr.DataArray(dai, dims=dim, coords=coord)
