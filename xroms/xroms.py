@@ -33,16 +33,16 @@ def sig2z(da, zr, zi, nvar='u'):
     N = da.shape
     if len(N) == 4:
         dai = np.empty((N[0],nzi,N[2],N[3]))
-        dim = [da.dims[0],'z',da.dims[2],da.dims[3]]
+        dim = [da.dims[0],'z',zr.dims[1],zr.dims[2]]
         coord = {da.dims[0]:da.coords[da.dims[0]],
-                'z':zi, da.dims[2]:da.coords[da.dims[2]],
-                da.dims[3]:da.coords[da.dims[3]]
+                'z':zi, zr.dims[1]:zr.coords[zr.dims[1]],
+                zr.dims[3]:zr.coords[zr.dims[2]]
                 }
     elif len(N) == 3:
         dai = np.empty((nzi,N[1],N[2]))
-        dim = ['z',da.dims[1],da.dims[2]]
-        coord = {'z':zi, da.dims[1]:da.coords[da.dims[1]],
-                da.dims[2]:da.coords[da.dims[2]]
+        dim = ['z',zr.dims[1],zr.dims[2]]
+        coord = {'z':zi, zr.dims[1]:zr.coords[zr.dims[1]],
+                zr.dims[2]:zr.coords[zr.dims[2]]
                 }
     else:
         raise ValueError("The data should at least have three dimensions")
