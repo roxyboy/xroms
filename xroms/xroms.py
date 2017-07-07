@@ -46,13 +46,13 @@ def sig2z(da, zr, zi, nvar=None):
         dai = np.empty((N[0],nzi,N[-2],N[-1]))
         dim = [dimd[0],'z',dimd[-2],dimd[-1]]
         coord = {dimd[0]:da.coords[dimd[0]],
-                'z':zi, dimd[-2]:da.coords[dimd[-2]],
+                'z':-zi, dimd[-2]:da.coords[dimd[-2]],
                 dimd[-1]:da.coords[dimd[-1]]
                 }
     elif len(N) == 3:
         dai = np.empty((nzi,N[-2],N[-1]))
         dim = ['z',dimd[-2],dimd[-1]]
-        coord = {'z':zi, dimd[-2]:da.coords[dimd[-2]],
+        coord = {'z':-zi, dimd[-2]:da.coords[dimd[-2]],
                 dimd[-1]:da.coords[dimd[-1]]
                 }
     else:
