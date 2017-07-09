@@ -28,3 +28,21 @@ def test_sig2z():
     znew = -np.linspace(z.min(), z.max(), N)
     with pytest.raises(ValueError):
         xm.sig2z(da4d, z, znew)
+
+def test_zeta():
+    N = 16
+    u = xr.DataArray(np.random.rand(N,N,N,N),
+                    dims=['time','z','eta_rho','xi_u'],
+                    coords={'time':range(N),'z':range(N),'eta_rho':range(N),
+                            'xi_u':range(N)}
+                    )
+    v = xr.DataArray(np.random.rand(N,N,N,N),
+                    dims=['time','z','eta_v','xi_rho'],
+                    coords={'time':range(N),'z':range(N),'eta_v':range(N),
+                            'xi_rho':range(N)}
+                      )
+    xx, yy = np.meshgrid(np.arange(N), np.arange(N))
+    xx = xr.DataArray(xx, dims=['y','x'], coords={'y':range(N), 'x':range(N)})
+    yy = xr.DataArray(yy, dims=['y','x'], coords={'y':range(N), 'x':range(N)})
+    with pytest.raises(ValueError):
+        xm.rel_vorticity(u, v, xx, yy)

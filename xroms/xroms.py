@@ -3,9 +3,10 @@ import xarray as xr
 import pandas as pd
 import functools as ft
 import scipy.interpolate as naiso
+import scipy.integrate as intg
 import dask.array as dsar
 
-__all__ = ["sig2z"]
+__all__ = ["sig2z","geo_streamfunc","rel_vorticity"]
 
 def _interpolate(x,y,xnew):
     f = naiso.interp1d(x,y,
@@ -91,3 +92,74 @@ def sig2z(da, zr, zi, nvar=None):
                                                      zi[int(ind[0]):])
 
     return xr.DataArray(dai, dims=dim, coords=coord)
+
+def geo_streamfunc(b, f0, eta=None, z=None, ax=None):
+    """
+    Calculates the geostrophic streamfunction based on the QG approximation.
+
+    .. math::
+
+     \psi = \frac{1}{f} \sum b \Delta z + \frac{g}{f} \eta
+
+    Parameters
+    ----------
+    b : `xarray.DataArray`
+        Buoyancy data
+    f0 : `float`
+        Coriolis parameter
+    eta : `xarray.DataArray` (optional)
+        Sea-surface height.
+    z : `xarray.DataArray` (optional)
+        The depths on which the buoyancy lies on
+    ax : `int` (optional)
+        The axis to take the integration over
+
+    Returns
+    -------
+    psi : `xarray.DataArray`
+        The geostrophic streamfunction on the
+        same depth coordinate system as buoyancy
+    """
+
+    g = 9.8
+    psi = f0**-1 * intg.cumtrapz(b.values, x=z, axis=ax)
+    if eta is not None:
+        psi += g*f0**-1 * eta.values
+
+    return xr.DataArray(psi, dims=b.dims, coords=b.coords)
+
+def rel_vorticity(u, v, x, y, dim=None, coord=None):
+    """
+    Calculates the relative vorticity. ROMS applies a C-grid so the
+    vorticity will be on \rho points.
+
+    .. math::
+     \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}
+
+    Parameters
+    ----------
+    u : `xarray.DataArray`
+        Zonal velocity
+    v : `xarray.DataArray`
+        Meridional velocity
+    x : `xarray.DataArray`
+        Location along the zonal axis. It should be aligned with `v`.
+    y : `xarray.DataArray`
+        Location along the meridional axis. It should be aligned with `u`.
+
+    Returns
+    -------
+    zeta : `xarray.DataArray`
+        Relative vorticity on \rho points.
+    """
+    if dim == None:
+        dim = u.dims
+    if coord == None:
+        coord = u.coords
+    if u.dims[-2:] != y.dims or v.dims[-2:] != x.dims:
+        raise ValueError("The dimensions of u and y or v and x do not match")
+
+    zeta = ((v.shift(xi_psi=-1) - v) / (x.shift(xi_v=-1) - x)
+            - (u.shift(eta_rho=-1) - u) / (y.shift(eta_u=-1) - y))
+
+    return xr.DataArray(zeta, dims=dim, coords=coord)
