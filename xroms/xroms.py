@@ -153,6 +153,7 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
     zeta : `xarray.DataArray`
         Relative vorticity on \rho points.
     """
+    
     if dim == None:
         dim = u.dims
     if coord == None:
