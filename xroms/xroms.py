@@ -153,7 +153,7 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
     zeta : `xarray.DataArray`
         Relative vorticity on \rho points.
     """
-    
+
     if dim == None:
         dim = u.dims
     if coord == None:
@@ -161,7 +161,7 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
     if u.dims[-2:] != y.dims or v.dims[-2:] != x.dims:
         raise ValueError("The dimensions of u and y or v and x do not match")
 
-    zeta = ((v.shift(xi_pho=-1) - v) / (x.shift(xi_v=-1) - x)
+    zeta = ((v.shift(xi_rho=-1) - v) / (x.shift(xi_v=-1) - x)
             - (u.shift(eta_rho=-1) - u) / (y.shift(eta_u=-1) - y))
 
     return xr.DataArray(zeta, dims=dim, coords=coord)
