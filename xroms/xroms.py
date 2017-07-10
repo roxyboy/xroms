@@ -93,7 +93,7 @@ def sig2z(da, zr, zi, nvar=None):
 
     return xr.DataArray(dai, dims=dim, coords=coord)
 
-def geo_streamfunc(b, f0, eta=None, z=None, ax=None):
+def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
     """
     Calculates the geostrophic streamfunction based on the QG approximation.
 
@@ -105,13 +105,15 @@ def geo_streamfunc(b, f0, eta=None, z=None, ax=None):
     ----------
     b : `xarray.DataArray`
         Buoyancy data
+    z : `xarray.DataArray` 
+        The depths on which the buoyancy lies on
     f0 : `float`
         Coriolis parameter
+    inl : float (optional)
+        The initial value for the `scipy.interpolate.cumtrapz` function
     eta : `xarray.DataArray` (optional)
         Sea-surface height.
-    z : `xarray.DataArray` (optional)
-        The depths on which the buoyancy lies on
-    ax : `int` (optional)
+    ax : int (optional)
         The axis to take the integration over
 
     Returns
@@ -121,8 +123,12 @@ def geo_streamfunc(b, f0, eta=None, z=None, ax=None):
         same depth coordinate system as buoyancy
     """
 
+    if b.ndim > 2:
+        if b.dims[-3:] != z.dims:
+            raise ValueError("`b` and `z` should have the same spatial dimension.")
+
     g = 9.8
-    psi = f0**-1 * intg.cumtrapz(b.values, x=z, axis=ax)
+    psi = f0**-1 * intg.cumtrapz(b.values, x=z.values, axis=ax, initial=inl)
     if eta is not None:
         psi += g*f0**-1 * eta.values
 
@@ -131,9 +137,10 @@ def geo_streamfunc(b, f0, eta=None, z=None, ax=None):
 def rel_vorticity(u, v, x, y, dim=None, coord=None):
     """
     Calculates the relative vorticity. ROMS applies a C-grid so the
-    vorticity will be on \rho points.
+    vorticity will be on \psi points.
 
     .. math::
+
      \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}
 
     Parameters
@@ -150,16 +157,20 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
     Returns
     -------
     zeta : `xarray.DataArray`
-        Relative vorticity on \rho points.
+        Relative vorticity on \psi points.
     """
-    if dim == None:
-        dim = u.dims
-    if coord == None:
-        coord = u.coords
+
     if u.dims[-2:] != y.dims or v.dims[-2:] != x.dims:
         raise ValueError("The dimensions of u and y or v and x do not match")
+    if u.shape != v.shape:
+        raise ValueError("`u` and `v` should have the same shape.")
 
-    zeta = ((v.shift(xi_psi=-1) - v) / (x.shift(xi_v=-1) - x)
-            - (u.shift(eta_rho=-1) - u) / (y.shift(eta_u=-1) - y))
+    zeta = (((v.shift(xi_rho=-1) - v)
+             / (x.shift(xi_rho=-1) - x)).isel(eta_v=slice(None,-1),
+                                             xi_rho=slice(None,-1)).values
+            - ((u.shift(eta_rho=-1) - u)
+               / (y.shift(eta_rho=-1) - y)).isel(eta_rho=slice(None,-1),
+                                                xi_u=slice(None,-1)).values
+           )
 
     return xr.DataArray(zeta, dims=dim, coords=coord)

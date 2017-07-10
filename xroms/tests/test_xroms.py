@@ -29,6 +29,20 @@ def test_sig2z():
     with pytest.raises(ValueError):
         xm.sig2z(da4d, z, znew)
 
+def test_streamfunc():
+    N = 16
+    da4d = xr.DataArray(np.random.rand(N,N,N,N),
+                    dims=['time','z','eta_rho','xi_u'],
+                    coords={'time':range(N),'z':range(N),'eta_rho':range(N),
+                            'xi_u':range(N)}
+                    )
+    z = xr.DataArray(np.random.rand(N,N,N),
+                    dims=['z','eta_rho','xi_rho'],
+                    coords={'z':range(N),'eta_rho':range(N),'xi_rho':range(N)}
+                    )
+    with pytest.raises(ValueError):
+        xm.geo_streamfunc(da4d, z, 0.)
+
 def test_zeta():
     N = 16
     u = xr.DataArray(np.random.rand(N,N,N,N),
