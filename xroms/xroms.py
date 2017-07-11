@@ -6,7 +6,7 @@ import scipy.interpolate as naiso
 import scipy.integrate as intg
 import dask.array as dsar
 
-__all__ = ["sig2z","geo_streamfunc","rel_vorticity"]
+__all__ = ["sig2z","geo_streamfunc","rel_vorticity","qgpv"]
 
 def _interpolate(x,y,xnew):
     f = naiso.interp1d(x,y,
@@ -38,7 +38,8 @@ def sig2z(da, zr, zi, nvar=None):
     if np.diff(zi)[0] < 0. or zi.max() <= 0.:
         raise ValueError("The values in `zi` should be postive and increasing.")
     if zr.ndim > da.ndim:
-        raise ValueError("`da` should have the same or more dimensions than `zr`")
+        raise ValueError("`da` should have the same"
+                        "or more dimensions than `zr`")
 
     dimd = da.dims
     N = da.shape
@@ -105,7 +106,7 @@ def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
     ----------
     b : `xarray.DataArray`
         Buoyancy data
-    z : `xarray.DataArray` 
+    z : `xarray.DataArray`
         The depths on which the buoyancy lies on
     f0 : `float`
         Coriolis parameter
@@ -125,7 +126,8 @@ def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
 
     if b.ndim > 2:
         if b.dims[-3:] != z.dims:
-            raise ValueError("`b` and `z` should have the same spatial dimension.")
+            raise ValueError("`b` and `z` should have"
+                            "the same spatial dimension.")
 
     g = 9.8
     psi = f0**-1 * intg.cumtrapz(b.values, x=z.values, axis=ax, initial=inl)
@@ -174,3 +176,71 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
            )
 
     return xr.DataArray(zeta, dims=dim, coords=coord)
+
+def qgpv(zeta, b, z, N2, f, eta, H, dim=None, coord=None):
+    """
+    Calculates the quasi-geostrophic PV on \rho points.
+
+    .. math::
+
+     q_surf = f0/H \times (b_surf/N^2 + \eta)
+     q_int = f + \zeta + f0 \times \frac{d}{dz} (\frac{b}{N^2})
+
+    Parameters
+    ----------
+    zeta : `xarray.DataArray`
+        Relative vorticity on \psi points
+    b : `xarray.DataArray`
+        Buoyancy between \s_rho points in the vertical
+        and on \rho points in the horizontal.
+    z : `xarray.DataArray`
+        Depths at which buoyancy is located
+    N2 : `xarray.DataArray`
+        Background buoyancy frequency.
+    f : `numpy.array`
+        Coriolis parameter
+    eta : `xarray.DataArray`
+        Sea-surface height.
+    H : `xarray.DataArray`
+        Bathymetry depth
+
+    Returns
+    -------
+    q : `xarray.DataArray`
+        QGPV on \rho points
+    """
+
+    if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
+        raise ValueError("`zeta` should be on \psi points.")
+    if b.dims[-3:] != N2.dims or b.dims[-3:] != z.dims:
+        raise ValueError("`b`, `N2` and `z` should have"
+                        "the same spatial dimension.")
+    if (np.trunc(H*1e4)/1e4 > np.trunc(z[-1]*1e4)/1e4).values.sum() != 0:
+        raise ValueError("Bathymetry shouldn't be shallower"
+                        "than the last grid point of `b`")
+
+    # move zeta to \rho points
+    zeta = .25 * (zeta + zeta.shift(lat_psi=-1) + zeta.shift(lon_psi=-1)
+                 + zeta.shift(lat_psi=-1, lon_psi=-1)
+                 ).isel(lat_psi=slice(None,-1), lon_psi=slice(None,-1)
+                       ).values
+
+    f0 = f.mean()
+    q = np.empty_like(b)
+    q[:] = np.nan
+    if q.ndim == 4:
+        q[:,0] = f0*(-H.values**-1) * (b[:,0]*N2[0] + eta).values
+        q[:,1:] = (f + zeta
+                   + f0 * ((b * N2**-1).diff(b.dims[-3]).values
+                          * z.diff(b.dims[-3]).values**-1
+                          )
+                   )
+    elif q.ndim == 3:
+        q[0] = f0*(-H.values**-1) * (b[0]*N2[0] + eta).values
+        q[1:] = (f + zeta
+                 + f0 * ((b * N2**-1).diff(b.dims[-3]).values
+                        * z.diff(b.dims[-3]).values**-1
+                        )
+                 )
+
+    return xr.DataArray(q, dims=dim, coords=coord)
