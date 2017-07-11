@@ -196,7 +196,7 @@ def qgpv(zeta, b, z, N2, f, eta, H, dim=None, coord=None):
     z : `xarray.DataArray`
         Depths at which buoyancy is located
     N2 : `xarray.DataArray`
-        Background buoyancy frequency.
+        Background buoyancy frequency squared.
     f : `numpy.array`
         Coriolis parameter
     eta : `xarray.DataArray`
@@ -229,14 +229,14 @@ def qgpv(zeta, b, z, N2, f, eta, H, dim=None, coord=None):
     q = np.empty_like(b)
     q[:] = np.nan
     if q.ndim == 4:
-        q[:,0] = f0*(-H.values**-1) * (b[:,0]*N2[0] + eta).values
+        q[:,0] = f0*(-H.values**-1) * (b[:,0]*N2[0]**-1 + eta).values
         q[:,1:] = (f + zeta
                    + f0 * ((b * N2**-1).diff(b.dims[-3]).values
                           * z.diff(b.dims[-3]).values**-1
                           )
                    )
     elif q.ndim == 3:
-        q[0] = f0*(-H.values**-1) * (b[0]*N2[0] + eta).values
+        q[0] = f0*(-H.values**-1) * (b[0]*N2[0]**-1 + eta).values
         q[1:] = (f + zeta
                  + f0 * ((b * N2**-1).diff(b.dims[-3]).values
                         * z.diff(b.dims[-3]).values**-1
