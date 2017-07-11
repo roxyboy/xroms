@@ -38,7 +38,7 @@ def sig2z(da, zr, zi, nvar=None):
     if np.diff(zi)[0] < 0. or zi.max() <= 0.:
         raise ValueError("The values in `zi` should be postive and increasing.")
     if zr.ndim > da.ndim:
-        raise ValueError("`da` should have the same"
+        raise ValueError("`da` should have the same "
                         "or more dimensions than `zr`")
 
     dimd = da.dims
@@ -213,10 +213,10 @@ def qgpv(zeta, b, z, N2, f, eta, H, dim=None, coord=None):
     if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
         raise ValueError("`zeta` should be on \psi points.")
     if b.dims[-3:] != N2.dims or b.dims[-3:] != z.dims:
-        raise ValueError("`b`, `N2` and `z` should have"
+        raise ValueError("`b`, `N2` and `z` should have "
                         "the same spatial dimension.")
     if (np.trunc(H*1e4)/1e4 > np.trunc(z[-1]*1e4)/1e4).values.sum() != 0:
-        raise ValueError("Bathymetry shouldn't be shallower"
+        raise ValueError("Bathymetry shouldn't be shallower "
                         "than the last grid point of `b`")
 
     # move zeta to \rho points
