@@ -85,12 +85,14 @@ def test_qgpv():
                            'x':(('eta_rho','xi_u'),xx)}
                     )
     zeta = xr.DataArray(xm.rel_vorticity(u, v, v.x, u.y),
-                    dims=['s_rho','eta_rho','xi_rho'],
-                    coords={'s_rho':range(N),'eta_rho':range(N-2),'xi_rho':range(N-2),
-                           'z':(('s_rho','eta_rho','xi_rho'),zz[:,1:-1,1:-1]),
-                           'y':(('eta_rho','xi_rho'),yy[1:-1,1:-1]),
-                           'x':(('eta_rho','xi_rho'),xx[1:-1,1:-1])}
-                    )
+                        dims=['s_rho','eta_rho','xi_rho'],
+                        coords={'s_rho':range(N),'eta_rho':range(N-2),
+                                'xi_rho':range(N-2),
+                               'z':(('s_rho','eta_rho','xi_rho'),
+                                    zz[:,1:-1,1:-1]),
+                               'y':(('eta_rho','xi_rho'),yy[1:-1,1:-1]),
+                               'x':(('eta_rho','xi_rho'),xx[1:-1,1:-1])}
+                        )
     npt.assert_allclose(zeta.values, 0.)
 
     f = np.ones((N,N))
