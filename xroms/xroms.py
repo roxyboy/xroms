@@ -9,6 +9,10 @@ import dask.array as dsar
 __all__ = ["sig2z","geo_streamfunc","rel_vorticity","qgpv"]
 
 def _interpolate(x,y,xnew):
+    """
+    Interpolates and flips the vertical coordinate as
+    the bottom layer is at the top of the array in sigma coordinates.
+    """
     f = naiso.interp1d(x,y,
                     fill_value='extrapolate')
     return f(xnew)[::-1]
