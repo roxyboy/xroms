@@ -68,7 +68,7 @@ def test_qgpv():
     #######
     N = 16
     xx, yy = np.meshgrid(np.arange(N), np.arange(N))
-    zz = -np.linspace(.1,N,N)[:,np.newaxis,np.newaxis] * np.ones((N,N))
+    zz = -np.arange(N)[:,np.newaxis,np.newaxis] * np.ones((N,N))
     v = xr.DataArray(np.zeros((N,N,N)),
                     dims=['s','eta_v','xi_rho'],
                     coords={'s':range(N),'eta_v':range(N),'xi_rho':range(N),
@@ -76,7 +76,7 @@ def test_qgpv():
                            'y':(('eta_v','xi_rho'),yy),
                            'x':(('eta_v','xi_rho'),xx)}
                     )
-    u = xr.DataArray((N-np.linspace(0,N,N))[:,np.newaxis,
+    u = xr.DataArray((N-np.arange(1,N+1))[:,np.newaxis,
                                             np.newaxis]*np.ones((N,N)),
                     dims=['s','eta_rho','xi_u'],
                     coords={'s':range(N),'eta_rho':range(N),'xi_u':range(N),
