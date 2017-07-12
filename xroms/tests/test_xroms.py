@@ -106,7 +106,7 @@ def test_qgpv():
     zb = .5 * (u.z[1:,0,0].values + u.z[:-1,0,0].values)
     b = np.cumsum(dbdy * u.y.diff('eta_rho')[0,0].values, axis=1)
 
-    H = xr.DataArray(-(.1 + N*np.ones((N-2,N-2))),
+    H = xr.DataArray(-(.1 + (N-1)*np.ones((N-2,N-2))),
                      dims=zeta[0].dims, coords=zeta[0].coords
                     )
     with pytest.raises(ValueError):
@@ -129,7 +129,7 @@ def test_qgpv():
                )
     npt.assert_allclose(q[1], 1.)
 
-    H = -(-.1 + N*np.ones((N-2,N-2)))
+    H = -(-.1 + (N-1)*np.ones((N-2,N-2)))
     with pytest.raises(ValueError):
         xm.qgpv(zeta, xr.DataArray(bnew, dims=['s','eta_rho','xi_u'],
                                    coords={'s':range(N),
