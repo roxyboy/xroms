@@ -134,7 +134,7 @@ def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
 
     return xr.DataArray(psi, dims=b.dims, coords=b.coords)
 
-def rel_vorticity(u, v, x, y, dim=None, coord=None):
+def rel_vorticity(u, v, x, y, dim=None, coord=None, shift=True):
     """
     Calculates the relative vorticity. ROMS applies a C-grid so the
     vorticity will be on \psi points.
@@ -153,11 +153,18 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
         Location along the zonal axis. It should be aligned with `v`.
     y : `xarray.DataArray`
         Location along the meridional axis. It should be aligned with `u`.
+    dim : list (optional)
+        Dimensions of `\zeta`
+    coord : dictionary (optional)
+        Coordinates of `\zeta`
+    shift : boolean (optional)
+        Option to shift `\zeta` from `\psi` to `\rho` points
 
     Returns
     -------
     zeta : `xarray.DataArray`
-        Relative vorticity on \psi points.
+        Relative vorticity. If `shift` is False, `\zeta` will be
+        returned on `\psi` points.
     """
 
     if u.dims[-2:] != y.dims or v.dims[-2:] != x.dims:
@@ -173,6 +180,12 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
                                                 xi_u=slice(None,-1)).values
            )
 
+    if shift:
+        zeta = .25 * np.delete(np.delete((zeta + np.roll(zeta, -1, axis=-1) +
+                      np.roll(zeta, -1, axis=-2)
+                      + np.roll(np.roll(zeta, -1, axis=-2), -1, axis=-1)
+                     ), -1, axis=-1), -1, axis=-2)
+
     return xr.DataArray(zeta, dims=dim, coords=coord)
 
 def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
@@ -187,7 +200,7 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     Parameters
     ----------
     zeta : `xarray.DataArray`
-        Relative vorticity on \psi points.
+        Relative vorticity.
     b : `xarray.DataArray`
         Buoyancy on \rho points.
     z : `xarray.DataArray`
@@ -209,8 +222,8 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
         QGPV on \rho points
     """
 
-    if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
-        raise ValueError("`zeta` should be on \psi points.")
+    # if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
+    #     raise ValueError("`zeta` should be on \psi points.")
     if b.dims[-3:] != z.dims:
         raise ValueError("`b` and `z` should have "
                         "the same spatial dimension.")
@@ -254,11 +267,11 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
                     b_intrp[t,:,j,i] = _interpolate(z[:,j,i], b[t,:,j,i],
                                                    zp[:,j,i])[::-1]
 
-    # move zeta to \rho points
-    zeta = .25 * (zeta + zeta.shift(lat_psi=-1) + zeta.shift(lon_psi=-1)
-                 + zeta.shift(lat_psi=-1, lon_psi=-1)
-                 ).isel(lat_psi=slice(None,-1), lon_psi=slice(None,-1)
-                       ).values
+    # # move zeta to \rho points
+    # zeta = .25 * (zeta + zeta.shift(lat_psi=-1) + zeta.shift(lon_psi=-1)
+    #              + zeta.shift(lat_psi=-1, lon_psi=-1)
+    #              ).isel(lat_psi=slice(None,-1), lon_psi=slice(None,-1)
+    #                    ).values
 
     f0 = f.mean()
     q_int = (f + zeta
