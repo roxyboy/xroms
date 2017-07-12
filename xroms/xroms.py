@@ -9,6 +9,10 @@ import dask.array as dsar
 __all__ = ["sig2z","geo_streamfunc","rel_vorticity","qgpv"]
 
 def _interpolate(x,y,xnew):
+    """
+    Interpolates and flips the vertical coordinate as
+    the bottom layer is at the top of the array in sigma coordinates.
+    """
     f = naiso.interp1d(x,y,
                     fill_value='extrapolate')
     return f(xnew)[::-1]
@@ -82,14 +86,12 @@ def sig2z(da, zr, zi, nvar=None):
                 ind = np.argwhere(zi >= zl[:,j,i].values.min())
                 if len(N) == 4:
                     for s in range(N[0]):
-                        dal = da[s,:,j,i].values
                         dai[s,:len(ind),j,i] = _interpolate(zl[:,j,i].values,
-                                                            dal,
+                                                            da[s,:,j,i].values,
                                                             zi[int(ind[0]):])
                 else:
-                    dal = da[:,j,i].values
                     dai[:len(ind),j,i] = _interpolate(zl[:,j,i].values,
-                                                     dal,
+                                                     da[:,j,i].values,
                                                      zi[int(ind[0]):])
 
     return xr.DataArray(dai, dims=dim, coords=coord)
@@ -136,7 +138,7 @@ def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
 
     return xr.DataArray(psi, dims=b.dims, coords=b.coords)
 
-def rel_vorticity(u, v, x, y, dim=None, coord=None):
+def rel_vorticity(u, v, x, y, dim=None, coord=None, shift=True):
     """
     Calculates the relative vorticity. ROMS applies a C-grid so the
     vorticity will be on \psi points.
@@ -155,11 +157,18 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
         Location along the zonal axis. It should be aligned with `v`.
     y : `xarray.DataArray`
         Location along the meridional axis. It should be aligned with `u`.
+    dim : list (optional)
+        Dimensions of `\zeta`
+    coord : dictionary (optional)
+        Coordinates of `\zeta`
+    shift : boolean (optional)
+        Option to shift `\zeta` from `\psi` to `\rho` points
 
     Returns
     -------
     zeta : `xarray.DataArray`
-        Relative vorticity on \psi points.
+        Relative vorticity. If `shift` is False, `\zeta` will be
+        returned on `\psi` points.
     """
 
     if u.dims[-2:] != y.dims or v.dims[-2:] != x.dims:
@@ -175,9 +184,15 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None):
                                                 xi_u=slice(None,-1)).values
            )
 
+    if shift:
+        zeta = .25 * np.delete(np.delete((zeta + np.roll(zeta, -1, axis=-1) +
+                      np.roll(zeta, -1, axis=-2)
+                      + np.roll(np.roll(zeta, -1, axis=-2), -1, axis=-1)
+                     ), -1, axis=-1), -1, axis=-2)
+
     return xr.DataArray(zeta, dims=dim, coords=coord)
 
-def qgpv(zeta, b, z, N2, f, eta, H, dim=None, coord=None):
+def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     """
     Calculates the quasi-geostrophic PV on \rho points.
 
@@ -189,14 +204,15 @@ def qgpv(zeta, b, z, N2, f, eta, H, dim=None, coord=None):
     Parameters
     ----------
     zeta : `xarray.DataArray`
-        Relative vorticity on \psi points
+        Relative vorticity.
     b : `xarray.DataArray`
-        Buoyancy between \s_rho points in the vertical
-        and on \rho points in the horizontal.
+        Buoyancy on \rho points.
     z : `xarray.DataArray`
-        Depths at which buoyancy is located
-    N2 : `xarray.DataArray`
+        Depths which buoyancy is on.
+    N2 : `numpy.array`
         Background buoyancy frequency squared.
+    zN2 : `numpy.array`
+        Depths which the background buoyancy frequency squared is on.
     f : `numpy.array`
         Coriolis parameter
     eta : `xarray.DataArray`
@@ -210,37 +226,72 @@ def qgpv(zeta, b, z, N2, f, eta, H, dim=None, coord=None):
         QGPV on \rho points
     """
 
-    if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
-        raise ValueError("`zeta` should be on \psi points.")
-    if b.dims[-3:] != N2.dims or b.dims[-3:] != z.dims:
-        raise ValueError("`b`, `N2` and `z` should have "
+    # if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
+    #     raise ValueError("`zeta` should be on \psi points.")
+    if b.dims[-3:] != z.dims:
+        raise ValueError("`b` and `z` should have "
                         "the same spatial dimension.")
-    if (np.trunc(H*1e4)/1e4 > np.trunc(z[-1]*1e4)/1e4).values.sum() != 0:
+    if (H > z[-1]).values.sum() != 0:
         raise ValueError("Bathymetry shouldn't be shallower "
                         "than the last grid point of `b`")
 
-    # move zeta to \rho points
-    zeta = .25 * (zeta + zeta.shift(lat_psi=-1) + zeta.shift(lon_psi=-1)
-                 + zeta.shift(lat_psi=-1, lon_psi=-1)
-                 ).isel(lat_psi=slice(None,-1), lon_psi=slice(None,-1)
-                       ).values
+    N = z.shape
+    N2_intrp = np.zeros((N[0]+1,N[1],N[2]))
+    N2_intrp[:] = np.nan
+    if b.ndim == 3:
+        b_intrp = N2_intrp.copy()
+    elif b.ndim == 4:
+        b_intrp = np.zeros((b.shape[0], N[0]+1, N[1], N[2]))
+        b_intrp[:] = np.nan
+
+    # For vertical finite differences...
+    dzr = np.zeros_like(N2_intrp)
+    dzr[0] = -z[0].values
+    dzr[1:-1] = -z.diff('s_rho').values
+    dzr[-1] = -H + z[-1].values
+    dzp = np.zeros(N)
+    dzp[0] = dzr[0] + dzr[1]*.5
+    dzp[1:-1] = .5*(dzr[1:-2]+dzr[2:-1])
+    dzp[-1] = dzr[-2]*.5 + dzr[-1]
+
+    # interface positions between rho points, where b will be interpolated
+    zp = np.zeros_like(dzr)
+    zp[0] = z[0]*.5
+    zp[1:] = -np.cumsum(dzp, axis=-3) # zp(nz+1) = -H
+
+    fN = naiso.interp1d(zN2, N2, fill_value='extrapolate')
+    for j in range(N[-2]):
+        for i in range(N[-1]):
+            N2_intrp[:,j,i] = fN(zp[:,j,i])
+            if b.ndim == 3:
+                b_intrp[:,j,i] = _interpolate(z[:,j,i], b[:,j,i],
+                                             zp[:,j,i])[::-1]
+            elif b.ndim == 4:
+                for t in range(b.shape[0]):
+                    b_intrp[t,:,j,i] = _interpolate(z[:,j,i], b[t,:,j,i],
+                                                   zp[:,j,i])[::-1]
+
+    # # move zeta to \rho points
+    # zeta = .25 * (zeta + zeta.shift(lat_psi=-1) + zeta.shift(lon_psi=-1)
+    #              + zeta.shift(lat_psi=-1, lon_psi=-1)
+    #              ).isel(lat_psi=slice(None,-1), lon_psi=slice(None,-1)
+    #                    ).values
 
     f0 = f.mean()
-    q = np.empty_like(b)
+    q_int = (f + zeta
+             + f0 * (np.diff(b_intrp * N2_intrp**-1, axis=-3)
+                     * np.diff(zp, axis=-3)**-1
+                    )
+            )
+    q = np.empty_like(b_intrp)
     q[:] = np.nan
     if q.ndim == 4:
-        q[:,0] = f0*(-H.values**-1) * (b[:,0]*N2[0]**-1 + eta).values
-        q[:,1:] = (f + zeta
-                   + f0 * ((b * N2**-1).diff(b.dims[-3]).values
-                          * z.diff(b.dims[-3]).values**-1
-                          )
-                   )
+        q[:,0] = f0*(-H.values**-1) * (b_intrp[:,0]*N2_intrp[0]**-1
+                                      + eta.values)
+        q[:,1:] = q_int
     elif q.ndim == 3:
-        q[0] = f0*(-H.values**-1) * (b[0]*N2[0]**-1 + eta).values
-        q[1:] = (f + zeta
-                 + f0 * ((b * N2**-1).diff(b.dims[-3]).values
-                        * z.diff(b.dims[-3]).values**-1
-                        )
-                 )
+        q[0] = f0*(-H.values**-1) * (b_intrp[0]*N2_intrp[0]**-1
+                                    + eta.values)
+        q[1:] = q_int
 
     return xr.DataArray(q, dims=dim, coords=coord)
