@@ -3,10 +3,13 @@ import xarray as xr
 import pandas as pd
 import functools as ft
 import scipy.interpolate as naiso
+import scipy.fftpack as fft
 import scipy.integrate as intg
+import scipy.signal as sig
 import dask.array as dsar
 
-__all__ = ["sig2z","geo_streamfunc","rel_vorticity","qgpv"]
+__all__ = ["sig2z","geo_streamfunc","geo_vel",
+           "rel_vorticity","qgpv","pv_inversion"]
 
 def _interpolate(x,y,xnew):
     """
@@ -98,7 +101,8 @@ def sig2z(da, zr, zi, nvar=None):
 
 def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
     """
-    Calculates the geostrophic streamfunction based on the QG approximation.
+    Calculates the geostrophic streamfunction on \rho points
+    based on the QG approximation.
 
     .. math::
 
@@ -123,7 +127,7 @@ def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
     -------
     psi : `xarray.DataArray`
         The geostrophic streamfunction on the
-        same depth coordinate system as buoyancy
+        same coordinate system as buoyancy
     """
 
     if b.ndim > 2:
@@ -137,6 +141,48 @@ def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
         psi += g*f0**-1 * eta.values
 
     return xr.DataArray(psi, dims=b.dims, coords=b.coords)
+
+def geo_vel(psi, udim=None, ucoord=None, vdim=None, vcoord=None):
+    """
+    Calculates the geostrophic velocity `ug` and `vg`
+    on `u` and `v` points respectively
+    from the geostrophic streamfunction.
+
+    .. math
+
+     u = -\frac{\partial \psi}{\partial y}
+     v = \frac{\partial \psi}{\partial x}
+
+    Parameters
+    ----------
+    psi : `xarray.DataArray`
+        Geostrophic streamfunction
+
+    Returns
+    -------
+    ug, vg : `xarray.DataArray`
+        Zonal and meridional geostrophic velocities.
+        `ug` and `vg` will have different shapes due to the
+        discretized differentiation.
+    """
+
+    ug = - ((psi.shift(eta_rho=-1) - psi)
+          / (psi.y.shift(eta_rho=-1) - psi.y)).isel(eta_rho=slice(None,-1))
+    vg = ((psi.shift(xi_rho=-1) - psi)
+        / (psi.x.shift(xi_rho=-1) - psi.x)).isel(xi_rho=slice(None,-1))
+    ug = .25 * (ug + ug.shift(eta_rho=-1) + ug.shift(xi_rho=-1)
+                + ug.shift(eta_rho=-1,xi_rho=-1)
+               ).isel(eta_rho=slice(None,-1),
+                      xi_rho=slice(None,-1)
+                     )
+    vg = .25 * (vg + vg.shift(eta_rho=-1) + vg.shift(xi_rho=-1)
+                + vg.shift(eta_rho=-1,xi_rho=-1)
+               ).isel(eta_rho=slice(None,-1),
+                      xi_rho=slice(None,-1)
+                     )
+
+    return xr.DataArray(ug.values,dims=udim,coords=ucoord), \
+           xr.DataArray(vg.values,dims=vdim,coords=vcoord)
 
 def rel_vorticity(u, v, x, y, dim=None, coord=None, shift=True):
     """
@@ -192,6 +238,24 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None, shift=True):
 
     return xr.DataArray(zeta, dims=dim, coords=coord)
 
+def _interp_vgrid(nz,ny,nx,z,H):
+    """Generate grid for vertical finite differences"""
+    dzr = np.zeros((nz+1,ny,nx))
+    dzr[0] = -z[0].values
+    dzr[1:-1] = -z.diff('s_rho').values
+    dzr[-1] = -H + z[-1].values
+    dzp = np.zeros((nz,ny,nx))
+    dzp[0] = dzr[0] + dzr[1]*.5
+    dzp[1:-1] = .5*(dzr[1:-2]+dzr[2:-1])
+    dzp[-1] = dzr[-2]*.5 + dzr[-1]
+
+    # interface positions between rho points, where b will be interpolated
+    zp = np.zeros_like(dzr)
+    zp[0] = z[0]*.5
+    zp[1:] = -np.cumsum(dzp, axis=-3) # zp[-1] = -H
+
+    return dzr, dzp, zp
+
 def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     """
     Calculates the quasi-geostrophic PV on \rho points.
@@ -244,20 +308,7 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
         b_intrp = np.zeros((b.shape[0], N[0]+1, N[1], N[2]))
         b_intrp[:] = np.nan
 
-    # For vertical finite differences...
-    dzr = np.zeros_like(N2_intrp)
-    dzr[0] = -z[0].values
-    dzr[1:-1] = -z.diff('s_rho').values
-    dzr[-1] = -H + z[-1].values
-    dzp = np.zeros(N)
-    dzp[0] = dzr[0] + dzr[1]*.5
-    dzp[1:-1] = .5*(dzr[1:-2]+dzr[2:-1])
-    dzp[-1] = dzr[-2]*.5 + dzr[-1]
-
-    # interface positions between rho points, where b will be interpolated
-    zp = np.zeros_like(dzr)
-    zp[0] = z[0]*.5
-    zp[1:] = -np.cumsum(dzp, axis=-3) # zp(nz+1) = -H
+    dzr, dzp, zp = _interp_vgrid(N[0],N[1],N[2],z,H)
 
     fN = naiso.interp1d(zN2, N2, fill_value='extrapolate')
     for j in range(N[-2]):
@@ -295,3 +346,88 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
         q[1:] = q_int
 
     return xr.DataArray(q, dims=dim, coords=coord)
+
+def _hanning(nx,ny):
+    """Hanning window"""
+    return sig.hanning(nx) * sig.hanning(ny)[:,np.newaxis]
+
+def pv_inversion(psi, N2, zN2, H, f0, dx, dy):
+    """
+    PV inversion
+
+    Parameters
+    ----------
+    psi : `xarray.DataArray`
+        Geostrophic streamfunction
+    N2 : `numpy.array`
+        Background buoyancy frequency
+    zN2 : `numpy.array`
+        Depths at which `N2` is on
+    H : `xarray.DataArray`
+        Bathymetry Depths (meters)
+    f0 : float
+        f-plane coriolis parameter
+    dx, dy : float
+        Representative grid scale of the domain.
+        Used for getting the wavenumbers.
+
+    Returns
+    -------
+    qgpv : `xarray.DataArray`
+        Quasi-geostrophic potential vorticity
+    """
+    g = 9.8
+    N = psi.shape
+
+    dzr, dzp, zp = _interp_vgrid(N[0],N[1],N[2],psi.z,H)
+
+    fN = naiso.interp1d(zN2, N2, fill_value='extrapolate')
+    A = np.zeros((N[0]+1, N[0]+1, N[1], N[2]))
+    for j in range(N[-2]):
+        for i in range(N[-1]):
+            N2_intrp = fN(zp[:,j,i])
+
+            r = f0**2/(N2_intrp*dzr)
+            rm = (r[0] + f0**2/g)/H  # coef of psi_s
+            ru = -r[0]/H
+
+            Adn = r[:-1]/dzp
+            Aup = np.zeros(N[0])
+            Aup[0] = ru
+            Aup[1:] = r[1:-1]/dzp[:-1]
+            Amid = np.zeros(N[0]+1)
+            Amid[0] = rm
+            Amid[1:-1] = -(r[:-2]+r[1:-1])/dzp[:-1]
+            Amid[-1] = -r[-2]/dzp[-1]
+
+            A[:,:,j,i] = np.diag(Adn,-1) + np.diag(Amid) + np.diag(Aup,1)
+
+            # # for use with tridiag, append Aup and Adn with 0s
+            # Aupa = np.append(Aup, 0.)
+            # Adna = np.append(0, Adn)
+
+    psigk = np.zeros_like(psi)
+    for k in range(N[-3]):
+        psigk[k] = fft.fftshift(fft.fft2(psi[k]
+                                * _hanning(N[-1],N[-2]))
+                               ) * (N[-1]*N[-2])**-1
+        zetag[k] = np.real(fft.ifft2(fft.ifftshift(-K2_ * psigk
+                                                * N[-1]*N[-2]))
+                        )
+
+    qgpvk = np.zeros_like(psi)
+    kx = np.arange(-int(N[-1]/2)+1,int(N[-1]/2)) * 2*np.pi/(N[-1]*dx)  # need dimensional wavenumbers!
+    ky = np.arange(-int(N[-2]/2)+1,int(N[-2]/2)) * 2*np.pi/(N[-2]*dy)
+    kx_, ky_ = np.meshgrid(kx, ky);
+    K2_ = kx_**2 + ky_**2 ;
+    for j in range(len(ky)):
+        for i in range(len(kx)):
+            Ak = A[:,:,j,i].copy()
+            Ak[1:,1:] -= np.eye(N[0])*K2_[j,i]
+            qgpvk[:,j,i] = np.dot(Ak, psigk[:,j,i])
+
+    qg = np.zeros_like(psi)
+    for k in range(N[0]):
+        qgpv[k] = np.real(fft.ifft2(fft.ifftshift(qgpvk[k])))*(N[-2]*N[-1])
+
+    return xr.DataArray(qgpv, dims=psi.dims, coords=psi.coords)
