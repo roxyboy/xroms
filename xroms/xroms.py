@@ -7,6 +7,7 @@ import scipy.fftpack as fft
 import scipy.integrate as intg
 import scipy.signal as sig
 import dask.array as dsar
+import xgcm.grid as xgd
 
 __all__ = ["sig2z","geo_streamfunc","geo_vel",
            "rel_vorticity","qgpv","pv_inversion"]
