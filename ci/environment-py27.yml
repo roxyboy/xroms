@@ -8,6 +8,7 @@ dependencies:
   - future
   - scipy
   - pip:
+    - docrep
     - codecov
     - pytest-cov
     - "--editable=git+https://github.com/xgcm/xgcm.git@master#egg=xgcm"
