@@ -162,7 +162,7 @@ def geo_vel(ds, ds_grid, psi, xname='x_rho', yname='y_rho',
     ----------
     ds : `xarray.Dataset`
         Object that includes all the data necessary
-    ds : `xarray.Dataset`
+    ds_grid : `xarray.Dataset`
         Object that includes the grid information
     psi : `xarray.Dataset`
         Geostrophic streamfunction
@@ -222,7 +222,7 @@ def rel_vorticity(ds, ds_grid, uname='u', vname='v',
     ----------
     ds : `xarray.Dataset`
         Object that includes all the data necessary
-    ds : `xarray.Dataset`
+    ds_grid : `xarray.Dataset`
         Object that includes the grid information
     shift : boolean (optional)
         If `True`, the geostrophic velocities will be interpolated
