@@ -7,9 +7,14 @@ import scipy.fftpack as fft
 import scipy.integrate as intg
 import scipy.signal as sig
 import dask.array as dsar
+import xgcm.grid as xgd
+import warnings
 
 __all__ = ["sig2z","geo_streamfunc","geo_vel",
            "rel_vorticity","qgpv","pv_inversion"]
+
+def _grid(ds, peri):
+    return xgd.Grid(ds, periodic=peri)
 
 def _interpolate(x,y,xnew):
     """
@@ -28,7 +33,7 @@ def sig2z(da, zr, zi, nvar=None):
     ----------
     da : `xarray.DataArray`
         The data on sigma coordinates to be interpolated
-    zr : `xarray.DataArray`
+    zr : `numpy.array`
         The depths corresponding to sigma layers
     zi : `numpy.array`
         The depths which to interpolate the data on
@@ -44,9 +49,9 @@ def sig2z(da, zr, zi, nvar=None):
 
     if np.diff(zi)[0] < 0. or zi.max() <= 0.:
         raise ValueError("The values in `zi` should be postive and increasing.")
-    if zr.ndim > da.ndim:
-        raise ValueError("`da` should have the same "
-                        "or more dimensions than `zr`")
+    if zr.shape != da.shape[-3:]:
+        raise ValueError("`zr` should have the same "
+                        "spatial dimensions as `da`.")
 
     dimd = da.dims
     N = da.shape
@@ -71,12 +76,12 @@ def sig2z(da, zr, zi, nvar=None):
     zi = -zi[::-1] # ROMS has deepest level at index=0
 
     if nvar=='u':  # u variables
-        zl = .5*(zr.shift(eta_rho=-1,xi_rho=-1)
-                 +zr.shift(eta_rho=-1)
+        zl = .5*(np.roll(np.roll(zr, -1, axis=-1), -1, axis=-2)
+                 + np.roll(zr, -1, axis=-2)
                 )
     elif nvar=='v': # v variables
-        zl = .5*(zr.shift(xi_rho=-1)
-                 +zr.shift(eta_rho=-1,xi_rho=-1)
+        zl = .5*(np.roll(zr, -1, axis=-1)
+                 + np.roll(np.roll(zr, -1, axis=-2), -1, axis=-1)
                 )
     else:
         zl = zr
@@ -84,16 +89,16 @@ def sig2z(da, zr, zi, nvar=None):
     for i in range(N[-1]):
         for j in range(N[-2]):
             # only bother for sufficiently deep regions
-            if zl[:,j,i].values.min() < -1e2:
+            if zl[:,j,i].min() < -1e2:
                 # only interp on z above topo
-                ind = np.argwhere(zi >= zl[:,j,i].values.min())
+                ind = np.argwhere(zi >= zl[:,j,i].min())
                 if len(N) == 4:
                     for s in range(N[0]):
-                        dai[s,:len(ind),j,i] = _interpolate(zl[:,j,i].values,
+                        dai[s,:len(ind),j,i] = _interpolate(zl[:,j,i],
                                                             da[s,:,j,i].values,
                                                             zi[int(ind[0]):])
                 else:
-                    dai[:len(ind),j,i] = _interpolate(zl[:,j,i].values,
+                    dai[:len(ind),j,i] = _interpolate(zl[:,j,i],
                                                      da[:,j,i].values,
                                                      zi[int(ind[0]):])
 
@@ -138,11 +143,12 @@ def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
     g = 9.8
     psi = f0**-1 * intg.cumtrapz(b.values, x=z.values, axis=ax, initial=inl)
     if eta is not None:
-        psi += g*f0**-1 * eta.values
+        psi += g*f0**-1 * eta.values[np.newaxis,:,:]
 
     return xr.DataArray(psi, dims=b.dims, coords=b.coords)
 
-def geo_vel(psi, udim=None, ucoord=None, vdim=None, vcoord=None):
+def geo_vel(ds, ds_grid, psi, xname='x_rho', yname='y_rho',
+            peri=False, shift=True):
     """
     Calculates the geostrophic velocity `ug` and `vg`
     on `u` and `v` points respectively
@@ -155,36 +161,56 @@ def geo_vel(psi, udim=None, ucoord=None, vdim=None, vcoord=None):
 
     Parameters
     ----------
-    psi : `xarray.DataArray`
+    ds : `xarray.Dataset`
+        Object that includes all the data necessary
+    ds_grid : `xarray.Dataset`
+        Object that includes the grid information
+    psi : `xarray.Dataset`
         Geostrophic streamfunction
+    shift : boolean (optional)
+        If `True`, the geostrophic velocities will be interpolated
+        to the center of each cell. If `False`, they will be on the
+        same grid points as `u` and `v`.
 
     Returns
     -------
     ug, vg : `xarray.DataArray`
         Zonal and meridional geostrophic velocities.
-        `ug` and `vg` will have different shapes due to the
-        discretized differentiation.
     """
 
-    ug = - ((psi.shift(eta_rho=-1) - psi)
-          / (psi.y.shift(eta_rho=-1) - psi.y)).isel(eta_rho=slice(None,-1))
-    vg = ((psi.shift(xi_rho=-1) - psi)
-        / (psi.x.shift(xi_rho=-1) - psi.x)).isel(xi_rho=slice(None,-1))
-    ug = .25 * (ug + ug.shift(eta_rho=-1) + ug.shift(xi_rho=-1)
-                + ug.shift(eta_rho=-1,xi_rho=-1)
-               ).isel(eta_rho=slice(None,-1),
-                      xi_rho=slice(None,-1)
-                     )
-    vg = .25 * (vg + vg.shift(eta_rho=-1) + vg.shift(xi_rho=-1)
-                + vg.shift(eta_rho=-1,xi_rho=-1)
-               ).isel(eta_rho=slice(None,-1),
-                      xi_rho=slice(None,-1)
-                     )
+    grid = _grid(ds, peri)
+    x = xr.DataArray(ds_grid[xname].values, dims=psi[0,0].dims,
+                     coords=psi[0,0].coords
+                    )
+    y = xr.DataArray(ds_grid[yname].values, dims=psi[0,0].dims,
+                     coords=psi[0,0].coords
+                    )
+    ug = - grid.diff(psi,'Y') / grid.diff(y,'Y')
+    vg = grid.diff(psi,'X') / grid.diff(x,'X')
 
-    return xr.DataArray(ug.values,dims=udim,coords=ucoord), \
-           xr.DataArray(vg.values,dims=vdim,coords=vcoord)
+    if shift:
+        ug = grid.interp(ug, 'Y', boundary='fill')
+        vg = grid.interp(vg, 'X', boundary='fill')
 
-def rel_vorticity(u, v, x, y, dim=None, coord=None, shift=True):
+    # ug = - ((psi.shift(eta_rho=-1) - psi)
+    #       / (psi.y.shift(eta_rho=-1) - psi.y)).isel(eta_rho=slice(None,-1))
+    # vg = ((psi.shift(xi_rho=-1) - psi)
+    #     / (psi.x.shift(xi_rho=-1) - psi.x)).isel(xi_rho=slice(None,-1))
+    # ug = .25 * (ug + ug.shift(eta_rho=-1) + ug.shift(xi_rho=-1)
+    #             + ug.shift(eta_rho=-1,xi_rho=-1)
+    #            ).isel(eta_rho=slice(None,-1),
+    #                   xi_rho=slice(None,-1)
+    #                  )
+    # vg = .25 * (vg + vg.shift(eta_rho=-1) + vg.shift(xi_rho=-1)
+    #             + vg.shift(eta_rho=-1,xi_rho=-1)
+    #            ).isel(eta_rho=slice(None,-1),
+    #                   xi_rho=slice(None,-1)
+    #                  )
+
+    return ug, vg
+
+def rel_vorticity(u, v, ds, ds_grid,
+                  xname='x_v', yname='y_u', shift=True, peri=False):
     """
     Calculates the relative vorticity. ROMS applies a C-grid so the
     vorticity will be on \psi points.
@@ -195,48 +221,44 @@ def rel_vorticity(u, v, x, y, dim=None, coord=None, shift=True):
 
     Parameters
     ----------
-    u : `xarray.DataArray`
-        Zonal velocity
-    v : `xarray.DataArray`
-        Meridional velocity
-    x : `xarray.DataArray`
-        Location along the zonal axis. It should be aligned with `v`.
-    y : `xarray.DataArray`
-        Location along the meridional axis. It should be aligned with `u`.
-    dim : list (optional)
-        Dimensions of `\zeta`
-    coord : dictionary (optional)
-        Coordinates of `\zeta`
+    u, v : `xarray.DataArray`
+        Zonal and meridional velocity respectively
+    ds_grid : `xarray.Dataset`
+        Object that includes the grid information
     shift : boolean (optional)
-        Option to shift `\zeta` from `\psi` to `\rho` points
+        If `True`, the geostrophic velocities will be shifted
+        half a cell.
 
     Returns
     -------
     zeta : `xarray.DataArray`
-        Relative vorticity. If `shift` is False, `\zeta` will be
-        returned on `\psi` points.
+        Relative vorticity.
     """
 
+    grid = _grid(ds, peri)
+    x = ds_grid[xname]
+    y = ds_grid[yname]
     if u.dims[-2:] != y.dims or v.dims[-2:] != x.dims:
-        raise ValueError("The dimensions of u and y or v and x do not match")
-    if u.shape != v.shape:
-        raise ValueError("`u` and `v` should have the same shape.")
+        warnings.warn("The dimensions of `u` and `y` and/or "
+                      "`v` and `x` do not match.")
+    x = xr.DataArray(x.values, dims=v[0,0].dims, coords=v[0,0].coords)
+    y = xr.DataArray(y.values, dims=u[0,0].dims, coords=u[0,0].coords)
+    # if u.shape != v.shape:
+    #     raise ValueError("`u` and `v` should have the same shape.")
+    dvdx = grid.diff(v,'X') / grid.diff(x,'X')
+    dudy = grid.diff(u,'Y') / grid.diff(y,'Y')
+    if dvdx.dims != dudy.dims:
+        dvdx = grid.interp(dvdx,'X',boundary='fill')
+        dudy = grid.interp(dudy,'Y',boundary='fill')
 
-    zeta = (((v.shift(xi_rho=-1) - v)
-             / (x.shift(xi_rho=-1) - x)).isel(eta_v=slice(None,-1),
-                                             xi_rho=slice(None,-1)).values
-            - ((u.shift(eta_rho=-1) - u)
-               / (y.shift(eta_rho=-1) - y)).isel(eta_rho=slice(None,-1),
-                                                xi_u=slice(None,-1)).values
-           )
+    zeta = dvdx - dudy
 
     if shift:
-        zeta = .25 * np.delete(np.delete((zeta + np.roll(zeta, -1, axis=-1) +
-                      np.roll(zeta, -1, axis=-2)
-                      + np.roll(np.roll(zeta, -1, axis=-2), -1, axis=-1)
-                     ), -1, axis=-1), -1, axis=-2)
+        zeta = grid.interp(grid.interp(zeta, 'X', boundary='extend'),
+                           'Y', boundary='extend'
+                          )
 
-    return xr.DataArray(zeta, dims=dim, coords=coord)
+    return zeta
 
 def _interp_vgrid(nz,ny,nx,z,H):
     """Generate grid for vertical finite differences"""
@@ -351,14 +373,17 @@ def _hanning(nx,ny):
     """Hanning window"""
     return sig.hanning(nx) * sig.hanning(ny)[:,np.newaxis]
 
-def pv_inversion(psi, N2, zN2, H, f0, dx, dy):
+def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
+                dim=None, coord=None, window=False):
     """
-    PV inversion
+    QGPV inversion from the geostrophic streamfunction.
 
     Parameters
     ----------
     psi : `xarray.DataArray`
         Geostrophic streamfunction
+    z : `xarray.DataArray`
+        Depths as which `psi` is on
     N2 : `numpy.array`
         Background buoyancy frequency
     zN2 : `numpy.array`
@@ -377,28 +402,37 @@ def pv_inversion(psi, N2, zN2, H, f0, dx, dy):
         Quasi-geostrophic potential vorticity
     """
     g = 9.8
+    if psi.ndim != 3:
+        raise ValueError("`psi` is expected to have only "
+                        "three spatial dimensions.")
+    if psi.dims != z.dims:
+        raise ValurError("`psi` and `z` should have "
+                        "the same dimensions.")
     N = psi.shape
+    psi_intrp = np.zeros((N[0]+1, N[1], N[2]))
 
-    dzr, dzp, zp = _interp_vgrid(N[0],N[1],N[2],psi.z,H)
+    dzr, dzp, zp = _interp_vgrid(N[0], N[1], N[2], z, H)
 
     fN = naiso.interp1d(zN2, N2, fill_value='extrapolate')
     A = np.zeros((N[0]+1, N[0]+1, N[1], N[2]))
     for j in range(N[-2]):
         for i in range(N[-1]):
             N2_intrp = fN(zp[:,j,i])
+            psi_intrp[:,j,i] = _interpolate(z[:,j,i], psi[:,j,i],
+                                            zp[:,j,i])[::-1]
 
-            r = f0**2/(N2_intrp*dzr)
-            rm = (r[0] + f0**2/g)/H  # coef of psi_s
-            ru = -r[0]/H
+            r = f0**2 / (N2_intrp * dzr[:,j,i])
+            rm = (r[0] + f0**2/g)/H[j,i]  # coef of psi_s
+            ru = -r[0]/H[j,i]
 
-            Adn = r[:-1]/dzp
+            Adn = r[:-1]/dzp[:,j,i]
             Aup = np.zeros(N[0])
             Aup[0] = ru
-            Aup[1:] = r[1:-1]/dzp[:-1]
+            Aup[1:] = r[1:-1]/dzp[:-1,j,i]
             Amid = np.zeros(N[0]+1)
             Amid[0] = rm
-            Amid[1:-1] = -(r[:-2]+r[1:-1])/dzp[:-1]
-            Amid[-1] = -r[-2]/dzp[-1]
+            Amid[1:-1] = -(r[:-2]+r[1:-1])/dzp[:-1,j,i]
+            Amid[-1] = -r[-2]/dzp[-1,j,i]
 
             A[:,:,j,i] = np.diag(Adn,-1) + np.diag(Amid) + np.diag(Aup,1)
 
@@ -406,28 +440,41 @@ def pv_inversion(psi, N2, zN2, H, f0, dx, dy):
             # Aupa = np.append(Aup, 0.)
             # Adna = np.append(0, Adn)
 
-    psigk = np.zeros_like(psi)
-    for k in range(N[-3]):
-        psigk[k] = fft.fftshift(fft.fft2(psi[k]
-                                * _hanning(N[-1],N[-2]))
-                               ) * (N[-1]*N[-2])**-1
-        zetag[k] = np.real(fft.ifft2(fft.ifftshift(-K2_ * psigk
-                                                * N[-1]*N[-2]))
-                        )
+    kx = fft.fftshift(fft.fftfreq(N[2], dx)) * 2.*np.pi
+    ky = fft.fftshift(fft.fftfreq(N[1], dy)) * 2.*np.pi
+    K2_ = kx[np.newaxis,:]**2 + ky[:,np.newaxis]**2
 
-    qgpvk = np.zeros_like(psi)
-    kx = np.arange(-int(N[-1]/2)+1,int(N[-1]/2)) * 2*np.pi/(N[-1]*dx)  # need dimensional wavenumbers!
-    ky = np.arange(-int(N[-2]/2)+1,int(N[-2]/2)) * 2*np.pi/(N[-2]*dy)
-    kx_, ky_ = np.meshgrid(kx, ky);
-    K2_ = kx_**2 + ky_**2 ;
+    psigk = np.zeros_like(psi_intrp, dtype=complex)
+    zetag = np.zeros_like(psi)
+    for k in range(N[0]+1):
+        if window:
+            psigk[k] = fft.fftshift(fft.fft2(psi_intrp[k]
+                                             * _hanning(N[-1],N[-2])
+                                            )
+                                   ) * (N[-1]*N[-2])**-1
+        else:
+            psigk[k] = fft.fftshift(fft.fft2(psi_intrp[k])
+                                   ) * (N[-1]*N[-2])**-1
+        if k > 0:
+            zetag[k-1] = np.real(fft.ifft2(fft.ifftshift(-K2_ * psigk[k]
+                                                         * N[-1]*N[-2]))
+                                )
+
+    qgpvk = np.zeros_like(psi_intrp, dtype=complex)
     for j in range(len(ky)):
         for i in range(len(kx)):
             Ak = A[:,:,j,i].copy()
             Ak[1:,1:] -= np.eye(N[0])*K2_[j,i]
             qgpvk[:,j,i] = np.dot(Ak, psigk[:,j,i])
 
-    qg = np.zeros_like(psi)
-    for k in range(N[0]):
+    qgpv = np.zeros_like(psi_intrp)
+    for k in range(N[0]+1):
         qgpv[k] = np.real(fft.ifft2(fft.ifftshift(qgpvk[k])))*(N[-2]*N[-1])
 
-    return xr.DataArray(qgpv, dims=psi.dims, coords=psi.coords)
+    return xr.DataArray(zetag, dims=psi.dims, coords=psi.coords), \
+           xr.DataArray(qgpv, dims=dim, coords=coord)
+
+def SA_mode(b):
+    """
+    Derives the decomposition of surface-aware modes.
+    """
