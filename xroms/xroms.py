@@ -18,7 +18,7 @@ def _grid(ds, peri):
 
 def _interpolate(x,y,xnew):
     """
-    Interpolates and flips the vertical coordinate as
+    Interpolates and flips the vertical coordinate so as
     the bottom layer is at the top of the array in sigma coordinates.
     """
     f = naiso.interp1d(x,y,
@@ -261,7 +261,15 @@ def rel_vorticity(u, v, ds, ds_grid,
     return zeta
 
 def _interp_vgrid(nz,ny,nx,z,H):
-    """Generate grid for vertical finite differences"""
+    """
+    Generate grid for vertical finite differences.
+
+    ..math
+     dzr = [-z[0], z[0]-z[1], z[1]-z[2], ..., z[-1]-H]
+     dzp &= [dzr[0]+dzr[1]/2, (dzr[1]+dzr[2])/2, ..., (dzr[-3]+dzr[-2])/2, dzr[-2]/2+dzr[-1]]\\
+         &= [(z[0]+z[1])/2, (z[0]-z[2])/2, (z[1]-z[3])/1, ..., (z[-2]+z[-1])/2-H]
+     zp = [z[0]/2, (z[0]+z[1])/2, (z[1]+z[2])/2, ..., (z[-2]+z[-1])/2, H]
+    """
     dzr = np.zeros((nz+1,ny,nx))
     dzr[0] = -z[0].values
     dzr[1:-1] = -z.diff('s_rho').values
@@ -274,7 +282,7 @@ def _interp_vgrid(nz,ny,nx,z,H):
     # interface positions between rho points, where b will be interpolated
     zp = np.zeros_like(dzr)
     zp[0] = z[0]*.5
-    zp[1:] = -np.cumsum(dzp, axis=-3) # zp[-1] = -H
+    zp[1:] = -np.cumsum(dzp, axis=-3) # zp[-1] = H
 
     return dzr, dzp, zp
 
@@ -309,7 +317,7 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     Returns
     -------
     q : `xarray.DataArray`
-        QGPV on \rho points
+        QGPV on \rho points with the Coriolis parameter added.
     """
 
     # if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
@@ -404,9 +412,9 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
     g = 9.8
     if psi.ndim != 3:
         raise ValueError("`psi` is expected to have only "
-                        "three spatial dimensions.")
+                        "three (spatial) dimensions.")
     if psi.dims != z.dims:
-        raise ValurError("`psi` and `z` should have "
+        raise ValueError("`psi` and `z` should have "
                         "the same dimensions.")
     N = psi.shape
     psi_intrp = np.zeros((N[0]+1, N[1], N[2]))
@@ -422,8 +430,8 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
                                             zp[:,j,i])[::-1]
 
             r = f0**2 / (N2_intrp * dzr[:,j,i])
-            rm = (r[0] + f0**2/g)/H[j,i]  # coef of psi_s
-            ru = -r[0]/H[j,i]
+            rm = -(r[0] + f0**2/g)/H[j,i]  # coef of psi_s
+            ru = r[0]/H[j,i]
 
             Adn = r[:-1]/dzp[:,j,i]
             Aup = np.zeros(N[0])
@@ -435,10 +443,6 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
             Amid[-1] = -r[-2]/dzp[-1,j,i]
 
             A[:,:,j,i] = np.diag(Adn,-1) + np.diag(Amid) + np.diag(Aup,1)
-
-            # # for use with tridiag, append Aup and Adn with 0s
-            # Aupa = np.append(Aup, 0.)
-            # Adna = np.append(0, Adn)
 
     kx = fft.fftshift(fft.fftfreq(N[2], dx)) * 2.*np.pi
     ky = fft.fftshift(fft.fftfreq(N[1], dy)) * 2.*np.pi
@@ -474,7 +478,61 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
     return xr.DataArray(zetag, dims=psi.dims, coords=psi.coords), \
            xr.DataArray(qgpv, dims=dim, coords=coord)
 
-def SA_mode(b):
+def SA_modes(ds, ds_grid, q, b, f, N2, zN2, H, dx, dy,
+            yname='y_rho', peri=False, nK=5000):
     """
     Derives the decomposition of surface-aware modes.
     """
+    if b.ndim != 3:
+        raise ValueError("`b` should only have three (spatial) dimensions.")
+    N = b.shape
+    grid = _grid(ds, peri)
+    y = ds_grid[yname]
+    dy = grid.interp(grid.diff(y,'Y'),'Y',boundary='fill').mean(dim='xi_rho')
+    bm = b.mean(dim='xi_rho')
+    bm_y = np.squeeze(bm.values * dy.values**-1)
+
+    f0 = np.mean(f)
+    beta = (f.mean(dim='xi_rho')[-1].values
+            - f.mean(dim='xi_rho')[0].values
+           ) / (y.mean(dim='xi_rho')[-1].values
+                - y.mean(dim='xi_rho')[0].values)
+
+    dzr, dzp, zp = _interp_vgrid(N[-3], N[-2], N[-1], z, H)
+
+    b_intrp = np.zeros((N[-3]+1,N[-2],N[-1]))
+    N2_intrp = np.zeros((N[-3]+1,N[-2],N[-1]))
+    N2_bar = np.zeros((N[-3]+1,N[-2]))
+    fN = naiso.interp1d(zN2, N2, fill_value='extrapolate')
+    for j in range(N[-2]):
+        N2_bar[:,j] = fN(np.mean(zp, axis=-1)[:,j])
+        N2_intrp[:,j,i] = fN(zp[:,j,i])
+        b_intrp[:,j,i] = _interpolate(z[:,j,i], b[:,j,i],
+                                     zp[:,j,i])[::-1]
+
+    Q_y = beta + f0*(bm_y[:,:-1] / N2_bar[np.newaxis,:-1]
+                     - bm_y[:,1:] / N2_bar[np.newaxis,1:]
+                    ) / np.mean(dzp, axis=-1)[np.newaxis,:]
+    Q_ym = np.mean(Q_y, axis=-1)
+
+    q_y = grid.interp(grid.diff(q.mean(dim='xi_rho'),'Y'),
+                      'Y',boundary='fill'
+                     ).values * dy.values**-1
+    q_ym = np.squeeze(np.mean(q_y, axis=-1))
+
+    nmodes = 5
+    kx = fft.fftshift(fft.fftfreq(N[-1], dx)) * 2.*np.pi
+    ky = fft.fftshift(fft.fftfreq(N[-2], dy)) * 2.*np.pi
+    k2v = np.unique(kx[np.newaxis,:]**2
+                    + ky[:,np.newaxis]**2)[1:]
+    kd2 = (2.*np.pi*f0)**2 / (N2_intrp.mean(axis=-3)*H**2)
+    atop = .1*k2v[1]/k2d
+
+    dzs = np.zeros(N[-3]+1,N[-2],N[-1])
+    dzs[0] = .5 * dzr[0]
+    dzs[1] = .5 * (dzr[0] + dzr[1])
+    dzs[2:] = dzp[1:]
+
+    phi = np.zeros((N[-3]+1,nmodes,nK,N[-2],N[-1]))
+    lam = np.zeros_like(phi[0])
+    s = np.zeros(nK,N[-2],N[-1])
