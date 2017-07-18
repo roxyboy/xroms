@@ -274,7 +274,7 @@ def _interp_vgrid(nz,ny,nx,z,H):
     dzr = np.zeros((nz+1,ny,nx))
     dzr[0] = -z[0].values
     dzr[1:-1] = -z.diff('s_rho').values
-    dzr[-1] = -H + z[-1].values
+    dzr[-1] = np.absolute(H) + z[-1].values
     dzp = np.zeros((nz,ny,nx))
     dzp[0] = dzr[0] + dzr[1]*.5
     dzp[1:-1] = .5*(dzr[1:-2]+dzr[2:-1])
@@ -368,11 +368,11 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     q = np.empty_like(b_intrp)
     q[:] = np.nan
     if q.ndim == 4:
-        q[:,0] = f0*(-H.values**-1) * (b_intrp[:,0]*N2_intrp[0]**-1
+        q[:,0] = f0*np.absolute(H.values)**-1 * (b_intrp[:,0]*N2_intrp[0]**-1
                                       + eta.values)
         q[:,1:] = q_int
     elif q.ndim == 3:
-        q[0] = f0*(-H.values**-1) * (b_intrp[0]*N2_intrp[0]**-1
+        q[0] = f0*np.absolute(H.values)**-1 * (b_intrp[0]*N2_intrp[0]**-1
                                     + eta.values)
         q[1:] = q_int
 
@@ -448,8 +448,8 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
                                             zp[:,j,i])[::-1]
 
             r = f0**2 / (N2_intrp * dzr[:,j,i])
-            rm = -(r[0] + f0**2/g)/H[j,i]  # coef of psi_s
-            ru = r[0]/H[j,i]
+            rm = -(r[0] + f0**2/g)/np.absolute(H[j,i])  # coef of psi_s
+            ru = r[0]/np.absolute(H[j,i])
 
             Adn = r[:-1]/dzp[:,j,i]
             Aup = np.zeros(N[0])
