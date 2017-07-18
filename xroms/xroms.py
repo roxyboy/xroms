@@ -264,7 +264,8 @@ def _interp_vgrid(nz,ny,nx,z,H):
     """
     Generate grid for vertical finite differences.
 
-    ..math
+    .. math::
+
      dzr = [-z[0], z[0]-z[1], z[1]-z[2], ..., z[-1]-H]
      dzp &= [dzr[0]+dzr[1]/2, (dzr[1]+dzr[2])/2, ..., (dzr[-3]+dzr[-2])/2, dzr[-2]/2+dzr[-1]]\\
          &= [(z[0]+z[1])/2, (z[0]-z[2])/2, (z[1]-z[3])/1, ..., (z[-2]+z[-1])/2-H]
@@ -300,7 +301,7 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     zeta : `xarray.DataArray`
         Relative vorticity.
     b : `xarray.DataArray`
-        Buoyancy on \rho points.
+        Buoyancy on `rho` points.
     z : `xarray.DataArray`
         Depths which buoyancy is on.
     N2 : `numpy.array`
@@ -317,7 +318,7 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     Returns
     -------
     q : `xarray.DataArray`
-        QGPV on \rho points with the Coriolis parameter added.
+        QGPV on `rho` points with the Coriolis parameter added.
     """
 
     # if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
@@ -385,6 +386,23 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
                 dim=None, coord=None, window=False):
     """
     QGPV inversion from the geostrophic streamfunction.
+
+    .. math::
+
+     The second-order derivative of an arbitrary variable `phi` is
+
+     \frac{d^2 \phi}{dz^2} = \frac{1}{dzp[i]} \bigg( \frac{\phi_i}{dzr[i]} - (\frac{1}{dzr[i]} + \frac{1}{dzr[i+1]})\phi_{i+1} + \frac{\phi_{i+2}}{dzr[i+1]} \bigg)
+
+     so the inversion matrix for the vertical derivative becomes
+
+     A = \left( \begin{array}{ccccccc}
+            -\frac{r[0] + f_0^2/g}{H} & \frac{r[0]}{H} & 0 & 0 & 0 & ... & 0 \\
+            \frac{r[0]}{dzp[0]} & -\frac{r[0]+r[1]}{dzp[0]} & \frac{r[1]}{dzp[0]} & 0 & 0 & ... & 0 \\
+            0 & \frac{r[1]}{dzp[1]} & -\frac{r[1]+r[2]}{dzp[1]} & \frac{r[2]}{dzp[1]} & 0 & ... & 0\\
+            ... \end{array}
+         \right)
+
+     where $r = \frac{f_0^2}{N^2} \frac{1}{dzr}$.
 
     Parameters
     ----------
