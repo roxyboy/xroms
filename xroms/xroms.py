@@ -448,8 +448,8 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
                                             zp[:,j,i])[::-1]
 
             r = f0**2 / (N2_intrp * dzr[:,j,i])
-            rm = -(r[0] + f0**2/g)/np.absolute(H[j,i])  # coef of psi_s
-            ru = r[0]/np.absolute(H[j,i])
+            rm = (r[0] + f0**2/g)/np.absolute(H[j,i])  # coef of psi_s
+            ru = -r[0]/np.absolute(H[j,i])
 
             Adn = r[:-1]/dzp[:,j,i]
             Aup = np.zeros(N[0])
@@ -495,6 +495,87 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
 
     return xr.DataArray(zetag, dims=psi.dims, coords=psi.coords), \
            xr.DataArray(qgpv, dims=dim, coords=coord)
+
+def _simodesA(A,dz,K2,nmodes,atop):
+
+    """
+    .. math::
+
+     Compute m-th eigenvectors phi_m and eigenvalues mu_m satisfying
+
+        [\frac{d}{dz} S \frac{d}{dz} - K^2] phi_m = -\mu_m^2 phi_m
+
+     with boundary conditions
+
+        (S/H) \frac{d}{dz} phi_m = mu_m^2/atop phi_m  @  z=ztop
+        (S/H) \frac{d}{dz} phi_m = 0                  @  z=zbot
+
+     where H = fluid depth (=sum(dz)), S = f^2/N^2 and K is the
+     horizontal wavenumber.
+
+    Parameters
+    ----------
+    A : `numpy.array`
+        psi-q matrix without K^2 part, such that:
+
+        A psi -[0, K2*psi(2:nz)] = Q = [b, q(z)],
+        b = f^2/(H N^2) \frac{d \psi}{dz} at z=0
+
+    dz : `numpy.array`
+        Vector of 'layer thicknesses' summing to H.
+        len(dz) = A.shape[0] - 1.
+
+    Returns
+    -------
+    phi(z,m,K) : `numpy.array`
+    lambda(m,K) : `numpy.array`
+        \sqrt{mu^2-K^2}
+
+        where 1 < m < nmodes <= length(dz).
+
+    Input parameters atop is nondimensional weight for surface mode.
+    """
+    # nz = length(A(:,1));
+    # H = sum(dz);
+    #
+    # mu = zeros(nmodes,1);
+    # phi = zeros(nz,nmodes);
+    # lam = zeros(size(mu));
+    #
+    # Ak = A - diag([0 K2*ones(1,nz-1)]);
+    # B = diag([1; dz/H]);
+    # F = -eye(nz); F(1,1) = 1;
+    # P =  eye(nz); P(1,1) = atop;
+    #
+    # FPA = F*P*Ak;
+    #
+    # [V,D] = eig(FPA);
+    #
+    # [mutemp,ri] = sort(sqrt(-diag(D)),'ascend');
+    #
+    # phitemp = V(:,ri(1:nmodes));
+    # mu = mutemp(1:nmodes);
+    # lambda = sqrt(mu.^2-K2);
+    #
+    # % Normalize based on (B5)
+    #
+    # FBA = F*B*Ak;
+    #
+    # for j=1:nmodes
+    #   Nm = transpose(phitemp(:,j))*FBA*phitemp(:,j);
+    #   phi(:,j) = phitemp(:,j)/sqrt(Nm);
+    #   phi(:,j) = sign(phi(1,j))*phi(:,j);
+    # end
+    #
+    #
+    # #  Normalize phi as in old version of simodes paper
+    # # for m=1:nmodes
+    # #   prod = phi(2:end,m)'*(phi(2:end,m).*dz(2:end)/H)+phi(1,m)'*phi(1,m)/atop;
+    # #   phi(:,m) = phi(:,m)/sqrt(prod);
+    # #   if (phi(1,m)<0)
+    # #     phi(:,m) = -phi(:,m);
+    # #   end
+    # # end
 
 def SA_modes(ds, ds_grid, q, b, f, N2, zN2, H, dx, dy,
             yname='y_rho', peri=False, nK=5000):
