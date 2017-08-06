@@ -57,4 +57,4 @@ MINOR = _version_minor
 MICRO = _version_micro
 VERSION = __version__
 PACKAGE_DATA = {'xroms': [pjoin('data', '*')]}
-REQUIRES = ["numpy", "xarray"]
+REQUIRES = ["numpy", "xarray", "dask", "xgcm"]

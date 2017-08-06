@@ -10,8 +10,15 @@ import dask.array as dsar
 import xgcm.grid as xgd
 import warnings
 
-__all__ = ["sig2z","geo_streamfunc","geo_vel",
+__all__ = ["set_coords","sig2z","geo_streamfunc","geo_vel",
            "rel_vorticity","qgpv","pv_inversion"]
+
+# convert everything that doesn't have a time dimension to coord
+def set_coords(ds):
+    new_coords = [varname for varname in ds.data_vars
+                  if ('time' not in ds[varname].dims)]
+    ds_new = ds.set_coords(new_coords)
+    return ds_new
 
 def _grid(ds, peri):
     return xgd.Grid(ds, periodic=peri)
@@ -31,7 +38,7 @@ def sig2z(da, zr, zi, nvar=None):
 
     Parameters
     ----------
-    da : `xarray.DataArray`
+    da : `dask.array`
         The data on sigma coordinates to be interpolated
     zr : `numpy.array`
         The depths corresponding to sigma layers
@@ -43,12 +50,14 @@ def sig2z(da, zr, zi, nvar=None):
 
     Returns
     -------
-    dai : `xarray.DataArray`
+    dai : `dask.array`
         The data interpolated onto a spatial uniform z coordinate
     """
 
     if np.diff(zi)[0] < 0. or zi.max() <= 0.:
         raise ValueError("The values in `zi` should be postive and increasing.")
+    if np.any(np.absolute(zr[0]) < np.absolute(zr[-1])):
+        raise ValueError("`zr` should have the deepest depth at index 0.")
     if zr.shape != da.shape[-3:]:
         raise ValueError("`zr` should have the same "
                         "spatial dimensions as `da`.")
