@@ -67,7 +67,7 @@ def test_zeta():
     ds_grid['y_rho'] = xr.DataArray(yy, dims=['y','x'],
                                 coords={'y':range(N), 'x':range(N-1)})
     with pytest.raises(ValueError):
-        xm.rel_vorticity(ds, ds_grid, xname='x_rho', yname='y_rho')
+        xm.rel_vorticity(ds.u, ds.v, ds, ds_grid, xname='x_rho', yname='y_rho')
 
     #######
     # Eady (\zeta = 0)

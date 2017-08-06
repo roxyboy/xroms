@@ -23,6 +23,7 @@ install:
   - "conda create -q -n test-environment python=%PYTHON_VERSION% numpy scipy matplotlib nose coverage pandas"
   - activate test-environment
   - pip install coverage
+  - pip install docrep
 
 test_script:
   - nosetests
