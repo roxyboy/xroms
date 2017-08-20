@@ -361,6 +361,7 @@ def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
     fN = naiso.interp1d(zN2, N2, fill_value='extrapolate')
     if intrp == 'both':
         dzr, dzp, zp = _interp_vgrid(N[0],N[1],N[2],z,H)
+        zi = zp.copy()
         N2_intrp = np.zeros((N[0]+1,N[1],N[2]))
         N2_intrp[:] = np.nan
         if b.ndim == 3:
@@ -374,18 +375,18 @@ def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
                 N2_intrp[:,j,i] = fN(zp[:,j,i])
                 if b.ndim == 3:
                     b_intrp[:,j,i] = _interpolate(z[:,j,i], b[:,j,i],
-                                                 zp[:,j,i])[::-1]
+                                                 zi[:,j,i])[::-1]
                 elif b.ndim == 4:
                     for t in range(b.shape[0]):
                         b_intrp[t,:,j,i] = _interpolate(z[:,j,i], b[t,:,j,i],
-                                                       zp[:,j,i])[::-1]
+                                                       zi[:,j,i])[::-1]
     elif intrp == 'N2':
+        zi = z
         N2_intrp = np.zeros((N[0],N[1],N[2]))
         N2_intrp[:] = np.nan
         for j in range(N[-2]):
             for i in range(N[-1]):
                 N2_intrp[:,j,i] = fN(z[:,j,i])
-        N2_intrp = N2
         b_intrp = b
 
     # # move zeta to \rho points
@@ -396,11 +397,26 @@ def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
 
     f0 = f.mean()
     q = np.zeros((b.shape[0], N[0]+2, N[1], N[2]))
-    qgpv = (zeta
-             + f0 * (np.diff(b_intrp * N2_intrp**-1, axis=-3)
-                     * np.diff(zp, axis=-3)**-1
-                    )
-            )
+    ddzbN2 = (np.diff(b_intrp * N2_intrp**-1, axis=-3)
+              * np.diff(zi, axis=-3)**-1
+             )
+    if zeta.shape == b_intrp.shape:
+        ddzbN2_intrp = np.zeros_like(b)
+        for j in range(N[-2]):
+            for i in range(N[-1]):
+                if b.ndim == 3:
+                    ddzbN2_intrp[:,j,i] = _interpolate(z[:,j,i],
+                                                 ddzbN2[:,j,i],
+                                                 zi[:,j,i])[::-1]
+                elif b.ndim == 4:
+                    for t in range(b.shape[0]):
+                        ddzbN2_intrp[t,:,j,i] = _interpolate(z[:,j,i],
+                                                       ddzbN2[t,:,j,i],
+                                                       zi[:,j,i])[::-1]
+    else:
+        ddzbN2_intrp = ddzbN2
+
+    qgpv = zeta + f0 * ddzbN2_intrp
     if q.ndim == 4:
         q[:,0] = f0*np.absolute(H.values)**-1 * (b_intrp[:,0]*N2_intrp[0]**-1
                                       + eta.values)
