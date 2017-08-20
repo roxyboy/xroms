@@ -332,7 +332,14 @@ def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
         Bathymetry depth
     bottom : `str`
         If bottom is `flat`, the quiescent bottom boundary condition
-        will be applied. If `sloped`, bottom aware mode will be applied.
+        will be applied. If `sloped`, boundary condition with
+        a sloped bottom will be applied.
+    intrp : `str`
+        If `both`, b and N2 will be interpolated in the vertical axis.
+        If 'N2', only N2 will be interpolated.
+    native_grid : `bool`
+        If `True`, the coordinate is assumed to be in the native grid
+        of the outputs.
 
     Returns
     -------
