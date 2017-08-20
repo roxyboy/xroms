@@ -310,7 +310,7 @@ def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
 
      q+ = f0/H \times (b[0]/N[0]^2 + \eta)
      q = \zeta + f0 \times \frac{d}{dz} (\frac{b}{N^2})
-     q- = f0/H \times (b[-1]/N[-1]^2 + \eta)
+     q- is subjective to the bottom boundary condition
 
     Parameters
     ----------
@@ -349,44 +349,37 @@ def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
 
     # if zeta.dims[-2:] != ('lat_psi', 'lon_psi'):
     #     raise ValueError("`zeta` should be on \psi points.")
-    if b.dims[-3:] != z.dims:
+    if zeta.dims != b.dims:
+        raise ValueError("`zeta` and `b` should have "
+                         "the same dimensions.")
+    if type(z)==xr.DataArray and b.dims[-3:]!=z.dims:
         raise ValueError("`b` and `z` should have "
-                        "the same spatial dimension.")
+                         "the same spatial dimension.")
     if native_grid:
         if (H > z[-1]).values.sum() != 0:
             raise ValueError("Bathymetry shouldn't be shallower "
-                            "than the last grid point of `b`")
+                             "than the last grid point of `b`")
 
     N = z.shape
+    nz = len(np.ma.masked_invalid(N2).compressed())+1
     fN = naiso.interp1d(zN2, N2, fill_value='extrapolate')
     if intrp == 'both':
-        dzr, dzp, zp = _interp_vgrid(N[0],N[1],N[2],z,H)
+        dzr, dzp, zp = _interp_vgrid(nz,N[1],N[2],z,H)
         zi = zp.copy()
-        N2_intrp = np.zeros((N[0]+1,N[1],N[2]))
+        N2_intrp = np.zeros((nz+1,N[1],N[2]))
         N2_intrp[:] = np.nan
-        if b.ndim == 3:
-            b_intrp = N2_intrp.copy()
-        elif b.ndim == 4:
-            b_intrp = np.zeros((b.shape[0], N[0]+1, N[1], N[2]))
-            b_intrp[:] = np.nan
+        b_intrp = np.zeros((b.shape[0], nz+1, N[1], N[2]))
+        b_intrp[:] = np.nan
 
         for j in range(N[-2]):
             for i in range(N[-1]):
-                N2_intrp[:,j,i] = fN(zp[:,j,i])
-                if b.ndim == 3:
-                    b_intrp[:,j,i] = _interpolate(z[:,j,i], b[:,j,i],
-                                                 zi[:,j,i])[::-1]
-                elif b.ndim == 4:
-                    for t in range(b.shape[0]):
-                        b_intrp[t,:,j,i] = _interpolate(z[:,j,i], b[t,:,j,i],
+                N2_intrp[:,j,i] = fN(zi[:,j,i])
+                for t in range(b.shape[0]):
+                    b_intrp[t,:,j,i] = _interpolate(z[:,j,i], b[t,:,j,i],
                                                        zi[:,j,i])[::-1]
     elif intrp == 'N2':
         zi = z
-        N2_intrp = np.zeros((N[0],N[1],N[2]))
-        N2_intrp[:] = np.nan
-        for j in range(N[-2]):
-            for i in range(N[-1]):
-                N2_intrp[:,j,i] = fN(z[:,j,i])
+        N2_intrp = fN(zi[:nz,0,0])
         b_intrp = b
 
     # # move zeta to \rho points
@@ -396,54 +389,40 @@ def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
     #                    ).values
 
     f0 = f.mean()
-    q = np.zeros((b.shape[0], N[0]+2, N[1], N[2]))
-    ddzbN2 = (np.diff(b_intrp * N2_intrp**-1, axis=-3)
-              * np.diff(zi, axis=-3)**-1
-             )
-    if zeta.shape == b_intrp.shape:
-        ddzbN2_intrp = np.zeros_like(b)
-        for j in range(N[-2]):
-            for i in range(N[-1]):
-                if b.ndim == 3:
-                    ddzbN2_intrp[:,j,i] = _interpolate(.5*(z[1:,j,i]+z[:-1,j,i]),
-                                                 ddzbN2[:,j,i],
-                                                 zi[:,j,i])[::-1]
-                elif b.ndim == 4:
-                    for t in range(b.shape[0]):
-                        ddzbN2_intrp[t,:,j,i] = _interpolate(.5*(z[1:,j,i]
-                                                                 +z[:-1,j,i]),
-                                                       ddzbN2[t,:,j,i],
-                                                       zi[:,j,i])[::-1]
-    else:
-        ddzbN2_intrp = ddzbN2
+    q = np.empty((b.shape[0], nz+2, N[1], N[2]))
+    q[:] = np.nan
+    for j in range(N[-2]):
+        for i in range(N[-1]):
+            nb = len(np.ma.masked_invalid(b_intrp[0,:,j,i]).compressed())
+            ddzbN2 = np.zeros((b.shape[0],nb))
+            if intrp == 'N2':
+                tempo = (np.diff(b_intrp[:,:nb,j,i]
+                         * N2_intrp[:nb]**-1, axis=1)
+                         * np.diff(zi[:nb,j,i], axis=0)**-1
+                        )
+            elif intrp == 'both':
+                tempo = (np.diff(b_intrp[:,:nb,j,i]
+                         * N2_intrp[:nb,j,i]**-1, axis=1)
+                         * np.diff(zi[:nb,j,i], axis=0)**-1
+                        )
+            ddzbN2[:,1:-1] = .5 * (tempo[:,1:] + tempo[:,:-1])
+            ddzbN2[:,0] = tempo[:,0]
+            ddzbN2[:,-1] = tempo[:,-1]
+            q[:,1:nb+1,j,i] = zeta[:,:nb,j,i] + f0 * ddzbN2
+            if bottom=='flat':
+                q[:,nb+1,j,i] = 0.
+            elif bottom=='sloped':
+                q[:,nb+1,j,i] = (f0*np.absolute(H.values)**-1
+                                    * (b_intrp[:,nb-1,j,i]
+                                    * N2_intrp[-1]**-1
+                                    + eta.values)
+                                )
+            else:
+                raise NotImplementedError("Unknown bottom boundary condition "
+                                          "specified.")
 
-    qgpv = zeta + f0 * ddzbN2_intrp
-    if q.ndim == 4:
-        q[:,0] = f0*np.absolute(H.values)**-1 * (b_intrp[:,0]*N2_intrp[0]**-1
-                                      + eta.values)
-        q[:,1:-1] = qgpv
-        if bottom=='flat':
-            pass
-        elif bottom=='sloped':
-            q[:,-1] = f0*np.absolute(H.values)**-1 * (b_intrp[:,-1]
-                                                      * N2_intrp[-1]**-1
-                                      + eta.values)
-        else:
-            raise NotImplementedError("Unknown bottom boundary condition "
-                                      "specified.")
-    elif q.ndim == 3:
-        q[0] = f0*np.absolute(H.values)**-1 * (b_intrp[:,0]*N2_intrp[0]**-1
-                                      + eta.values)
-        q[1:-1] = qgpv
-        if bottom=='flat':
-            pass
-        elif bottom=='sloped':
-            q[-1] = f0*np.absolute(H.values)**-1 * (b_intrp[:,-1]
-                                                    * N2_intrp[-1]**-1
-                                      + eta.values)
-        else:
-            raise NotImplementedError("Unknown bottom boundary condition "
-                                      "specified.")
+    q[:,0] = f0*np.absolute(H.values)**-1 * (b_intrp[:,0]*N2_intrp[0]**-1
+                                  + eta.values)
 
     return xr.DataArray(q, dims=dim, coords=coord)
 
