@@ -11,7 +11,7 @@ import xgcm.grid as xgd
 import warnings
 
 __all__ = ["set_coords","sig2z","geo_streamfunc","geo_vel",
-           "rel_vorticity","qgpv","pv_inversion"]
+           "rel_vorticity","generalized_qgpv","pv_inversion"]
 
 # convert everything that doesn't have a time dimension to coord
 def set_coords(ds):
@@ -147,13 +147,14 @@ def geo_streamfunc(b, z, f0, inl=0., eta=None, ax=None):
         same coordinate system as buoyancy
     """
 
-    if b.ndim > 2:
+    if type(z)==xr.DataArray and b.ndim > 2:
         if b.dims[-3:] != z.dims:
-            raise ValueError("`b` and `z` should have"
-                            "the same spatial dimension.")
+            raise ValueError("`b` and `z` should have "
+                             "the same spatial dimension.")
+        z = z.values
 
     g = 9.8
-    psi = f0**-1 * intg.cumtrapz(b.values, x=z.values, axis=ax, initial=inl)
+    psi = f0**-1 * intg.cumtrapz(b.values, x=z, axis=ax, initial=inl)
     if eta is not None:
         psi += g*f0**-1 * eta.values[np.newaxis,:,:]
 
@@ -253,8 +254,8 @@ def rel_vorticity(u, v, ds, ds_grid,
     if u.dims[-2:] != y.dims or v.dims[-2:] != x.dims:
         warnings.warn("The dimensions of `u` and `y` and/or "
                       "`v` and `x` do not match.")
-    x = xr.DataArray(x.values, dims=v[0,0].dims, coords=v[0,0].coords)
-    y = xr.DataArray(y.values, dims=u[0,0].dims, coords=u[0,0].coords)
+        x = xr.DataArray(x.values, dims=v[0,0].dims, coords=v[0,0].coords)
+        y = xr.DataArray(y.values, dims=u[0,0].dims, coords=u[0,0].coords)
     # if u.shape != v.shape:
     #     raise ValueError("`u` and `v` should have the same shape.")
     dvdx = grid.diff(v,'X') / grid.diff(x,'X')
@@ -299,14 +300,17 @@ def _interp_vgrid(nz,ny,nx,z,H):
 
     return dzr, dzp, zp
 
-def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
+def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
+         dim=None, coord=None, bottom='flat',
+         intrp='both', native_grid=True):
     """
     Calculates the quasi-geostrophic PV on \rho points.
 
     .. math::
 
-     q_surf = f0/H \times (b_surf/N^2 + \eta)
-     q_int = f + \zeta + f0 \times \frac{d}{dz} (\frac{b}{N^2})
+     q+ = f0/H \times (b[0]/N[0]^2 + \eta)
+     q = \zeta + f0 \times \frac{d}{dz} (\frac{b}{N^2})
+     q- = f0/H \times (b[-1]/N[-1]^2 + \eta)
 
     Parameters
     ----------
@@ -326,6 +330,16 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
         Sea-surface height.
     H : `xarray.DataArray`
         Bathymetry depth
+    bottom : `str`
+        If bottom is `flat`, the quiescent bottom boundary condition
+        will be applied. If `sloped`, boundary condition with
+        a sloped bottom will be applied.
+    intrp : `str`
+        If `both`, b and N2 will be interpolated in the vertical axis.
+        If 'N2', only N2 will be interpolated.
+    native_grid : `bool`
+        If `True`, the coordinate is assumed to be in the native grid
+        of the outputs.
 
     Returns
     -------
@@ -338,32 +352,41 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     if b.dims[-3:] != z.dims:
         raise ValueError("`b` and `z` should have "
                         "the same spatial dimension.")
-    if (H > z[-1]).values.sum() != 0:
-        raise ValueError("Bathymetry shouldn't be shallower "
-                        "than the last grid point of `b`")
+    if native_grid:
+        if (H > z[-1]).values.sum() != 0:
+            raise ValueError("Bathymetry shouldn't be shallower "
+                            "than the last grid point of `b`")
 
     N = z.shape
-    N2_intrp = np.zeros((N[0]+1,N[1],N[2]))
-    N2_intrp[:] = np.nan
-    if b.ndim == 3:
-        b_intrp = N2_intrp.copy()
-    elif b.ndim == 4:
-        b_intrp = np.zeros((b.shape[0], N[0]+1, N[1], N[2]))
-        b_intrp[:] = np.nan
-
-    dzr, dzp, zp = _interp_vgrid(N[0],N[1],N[2],z,H)
-
     fN = naiso.interp1d(zN2, N2, fill_value='extrapolate')
-    for j in range(N[-2]):
-        for i in range(N[-1]):
-            N2_intrp[:,j,i] = fN(zp[:,j,i])
-            if b.ndim == 3:
-                b_intrp[:,j,i] = _interpolate(z[:,j,i], b[:,j,i],
-                                             zp[:,j,i])[::-1]
-            elif b.ndim == 4:
-                for t in range(b.shape[0]):
-                    b_intrp[t,:,j,i] = _interpolate(z[:,j,i], b[t,:,j,i],
-                                                   zp[:,j,i])[::-1]
+    if intrp == 'both':
+        dzr, dzp, zp = _interp_vgrid(N[0],N[1],N[2],z,H)
+        N2_intrp = np.zeros((N[0]+1,N[1],N[2]))
+        N2_intrp[:] = np.nan
+        if b.ndim == 3:
+            b_intrp = N2_intrp.copy()
+        elif b.ndim == 4:
+            b_intrp = np.zeros((b.shape[0], N[0]+1, N[1], N[2]))
+            b_intrp[:] = np.nan
+
+        for j in range(N[-2]):
+            for i in range(N[-1]):
+                N2_intrp[:,j,i] = fN(zp[:,j,i])
+                if b.ndim == 3:
+                    b_intrp[:,j,i] = _interpolate(z[:,j,i], b[:,j,i],
+                                                 zp[:,j,i])[::-1]
+                elif b.ndim == 4:
+                    for t in range(b.shape[0]):
+                        b_intrp[t,:,j,i] = _interpolate(z[:,j,i], b[t,:,j,i],
+                                                       zp[:,j,i])[::-1]
+    elif intrp == 'N2':
+        N2_intrp = np.zeros((N[0],N[1],N[2]))
+        N2_intrp[:] = np.nan
+        for j in range(N[-2]):
+            for i in range(N[-1]):
+                N2_intrp[:,j,i] = fN(z[:,j,i])
+        N2_intrp = N2
+        b_intrp = b
 
     # # move zeta to \rho points
     # zeta = .25 * (zeta + zeta.shift(lat_psi=-1) + zeta.shift(lon_psi=-1)
@@ -372,21 +395,38 @@ def qgpv(zeta, b, z, N2, zN2, f, eta, H, dim=None, coord=None):
     #                    ).values
 
     f0 = f.mean()
-    q_int = (f + zeta
+    q = np.zeros((b.shape[0], N[0]+2, N[1], N[2]))
+    qgpv = (zeta
              + f0 * (np.diff(b_intrp * N2_intrp**-1, axis=-3)
                      * np.diff(zp, axis=-3)**-1
                     )
             )
-    q = np.empty_like(b_intrp)
-    q[:] = np.nan
     if q.ndim == 4:
         q[:,0] = f0*np.absolute(H.values)**-1 * (b_intrp[:,0]*N2_intrp[0]**-1
                                       + eta.values)
-        q[:,1:] = q_int
+        q[:,1:-1] = qgpv
+        if bottom=='flat':
+            pass
+        elif bottom=='sloped':
+            q[:,-1] = f0*np.absolute(H.values)**-1 * (b_intrp[:,-1]
+                                                      * N2_intrp[-1]**-1
+                                      + eta.values)
+        else:
+            raise NotImplementedError("Unknown bottom boundary condition "
+                                      "specified.")
     elif q.ndim == 3:
-        q[0] = f0*np.absolute(H.values)**-1 * (b_intrp[0]*N2_intrp[0]**-1
-                                    + eta.values)
-        q[1:] = q_int
+        q[0] = f0*np.absolute(H.values)**-1 * (b_intrp[:,0]*N2_intrp[0]**-1
+                                      + eta.values)
+        q[1:-1] = qgpv
+        if bottom=='flat':
+            pass
+        elif bottom=='sloped':
+            q[-1] = f0*np.absolute(H.values)**-1 * (b_intrp[:,-1]
+                                                    * N2_intrp[-1]**-1
+                                      + eta.values)
+        else:
+            raise NotImplementedError("Unknown bottom boundary condition "
+                                      "specified.")
 
     return xr.DataArray(q, dims=dim, coords=coord)
 
@@ -403,7 +443,9 @@ def pv_inversion(psi, z, N2, zN2, H, f0, dx, dy,
 
      The second-order derivative of an arbitrary variable `phi` is
 
-     \frac{d^2 \phi}{dz^2} = \frac{1}{dzp[i]} \bigg( \frac{\phi_i}{dzr[i]} - (\frac{1}{dzr[i]} + \frac{1}{dzr[i+1]})\phi_{i+1} + \frac{\phi_{i+2}}{dzr[i+1]} \bigg)
+     \frac{d^2 \phi}{dz^2} = &\frac{1}{dzp[i]} \bigg( \frac{\phi_i}{dzr[i]} \\
+                             &- (\frac{1}{dzr[i]} + \frac{1}{dzr[i+1]})\phi_{i+1}
+                             &+ \frac{\phi_{i+2}}{dzr[i+1]} \bigg)
 
      so the inversion matrix for the vertical derivative becomes
 
