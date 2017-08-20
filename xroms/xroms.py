@@ -405,12 +405,13 @@ def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
         for j in range(N[-2]):
             for i in range(N[-1]):
                 if b.ndim == 3:
-                    ddzbN2_intrp[:,j,i] = _interpolate(z[:,j,i],
+                    ddzbN2_intrp[:,j,i] = _interpolate(.5*(z[1:,j,i]+z[:-1,j,i]),
                                                  ddzbN2[:,j,i],
                                                  zi[:,j,i])[::-1]
                 elif b.ndim == 4:
                     for t in range(b.shape[0]):
-                        ddzbN2_intrp[t,:,j,i] = _interpolate(z[:,j,i],
+                        ddzbN2_intrp[t,:,j,i] = _interpolate(.5*(z[1:,j,i]
+                                                                 +z[:-1,j,i]),
                                                        ddzbN2[t,:,j,i],
                                                        zi[:,j,i])[::-1]
     else:
