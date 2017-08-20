@@ -300,7 +300,7 @@ def _interp_vgrid(nz,ny,nx,z,H):
 
     return dzr, dzp, zp
 
-def qgpv(zeta, b, z, N2, zN2, f, eta, H,
+def generalized_qgpv(zeta, b, z, N2, zN2, f, eta, H,
          dim=None, coord=None, bottom='flat',
          intrp='both', native_grid=True):
     """
