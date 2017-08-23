@@ -688,7 +688,7 @@ def SA_modes(ds, ds_grid, q, b, f, N2, zN2, H, dx, dy,
     s = np.zeros(nK,N[-2],N[-1])
 
 def vertprofile_flux(ds, wbar, ubar, vbar, tcbar,
-                     xr, yr, zr, zi, ntracer='O2'):
+                     x_r, y_r, zr, zi, ntracer='O2'):
     """
     Calculates the vertical profile of tracer fluxes
 
@@ -704,7 +704,7 @@ def vertprofile_flux(ds, wbar, ubar, vbar, tcbar,
         Mean of meridional velocity.
     tcbar : `xarray.DataArray`
         Mean of the tracer
-    xr, yr : `xarray.DataArray`
+    x_r, y_r : `xarray.DataArray`
         Zonal and meridional grid spacings on `rho` points.
     zr : `xarray.DataArray`
         Vertical depth in sigma coordinates on `rho` points.
@@ -785,12 +785,12 @@ def vertprofile_flux(ds, wbar, ubar, vbar, tcbar,
 
     advwbar = .5*(wbar+wbar.shift(s_rho=-1))[:-1] * (tcbar.diff(dim=wdim[1])
                                                 / zr.diff(dim=wdim[1])).values
-    advubar = ubar * grid.diff(tcbar,'X') / grid.diff(xr,'X').values
-    advvbar = vbar * grid.diff(tcbar,'Y') / grid.diff(yr,'Y').values
+    advubar = ubar * grid.diff(tcbar,'X') / grid.diff(x_r,'X').values
+    advvbar = vbar * grid.diff(tcbar,'Y') / grid.diff(y_r,'Y').values
     advwp = .5*(wp+wp.shift(s_rho=-1))[:,:-1] * (tcp.diff(dim=wdim[1])
                                                 / zr.diff(dim=wdim[1])).values
-    advup = up * grid.diff(tcp,'X') / grid.diff(xr,'X').values
-    advvp = vp * grid.diff(tcp,'Y') / grid.diff(yr,'Y').values
+    advup = up * grid.diff(tcp,'X') / grid.diff(x_r,'X').values
+    advvp = vp * grid.diff(tcp,'Y') / grid.diff(y_r,'Y').values
     tctend = tc.diff(dim=wdim[0]) / tc.time.diff(dim=wdim[0])
 
     advwbar = sig2z(advwbar, .5*(zr+zr.shift(s_rho=-1))[:-1].values, zi,
