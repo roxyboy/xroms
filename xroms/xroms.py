@@ -11,7 +11,8 @@ import xgcm.grid as xgd
 import warnings
 
 __all__ = ["set_coords","sig2z","geo_streamfunc","geo_vel",
-           "rel_vorticity","generalized_qgpv","pv_inversion"]
+           "rel_vorticity","generalized_qgpv","pv_inversion",
+           "vertprofile_flux"]
 
 # convert everything that doesn't have a time dimension to coord
 def set_coords(ds):
@@ -685,3 +686,142 @@ def SA_modes(ds, ds_grid, q, b, f, N2, zN2, H, dx, dy,
     phi = np.zeros((N[-3]+1,nmodes,nK,N[-2],N[-1]))
     lam = np.zeros_like(phi[0])
     s = np.zeros(nK,N[-2],N[-1])
+
+def vertprofile_flux(ds, wbar, ubar, vbar, tcbar,
+                     xr, yr, zr, zi, ntracer='O2'):
+    """
+    Calculates the vertical profile of tracer fluxes
+
+    Parameters
+    ----------
+    ds : `xarray.Dataset`
+        Data set of necessary variables.
+    wbar : `xarray.DataArray`
+        Mean of vertical velocity.
+    ubar : `xarray.DataArray`
+        Mean of zonal velocity.
+    vbar : `xarray.DataArray`
+        Mean of meridional velocity.
+    tcbar : `xarray.DataArray`
+        Mean of the tracer
+    xr, yr : `xarray.DataArray`
+        Zonal and meridional grid spacings on `rho` points.
+    zr : `xarray.DataArray`
+        Vertical depth in sigma coordinates on `rho` points.
+    zi : `numpy array`
+        Vertical depth in z coordinates on which the data will
+        be interpolated.
+    ntracer : `str`
+        Name of tracer. Default is oxygen.
+
+    Returns
+    -------
+    advwbar : `xarray.DataArray`
+        Vertical advection by the mean.
+    advubar : `xarray.DataArray`
+        Zonal advection by the mean.
+    advvbar : `xarray.DataArray`
+        Meridional advection by the mean
+    advwpp : `xarray.DataArray`
+        Vertical advection by the perturbation.
+    advupp : `xarray.DataArray`
+        Zonal advection by the perturbation.
+    advvpp : `xarray.DataArray`
+        Meridional advection by the perturbation.
+    tctend : `xarray.DataArray`
+        Tendency of tracer concentration.
+    """
+    w = ds.w
+    u = ds.u
+    v = ds.v
+    tc = ds[ntracer]
+    grid = xgd.Grid(ds, periodic=[])
+    zu = grid.interp(zr, 'X')
+    zv = grid.interp(zr, 'Y')
+
+    wN=w.shape; uN=u.shape; vN=v.shape
+    wdim=w.dims; udim=u.dims; vdim=v.dims
+
+    # advwbar = xr.DataArray(np.zeros((wN[1]-1, wN[2], wN[3])),
+    #                        dims=wdim,
+    #                        coords={wdim[1]:w[wdim[1]][:-1], wdim[2]:w[wdim[2]],
+    #                                wdim[3]:w[wdim[3]]}
+    #                       )
+    # advubar = xr.DataArray(np.zeros((uN[1], uN[2], uN[3])),
+    #                        dims=udim,
+    #                        coords={udim[1]:u[udim[1]], udim[2]:u[udim[2]],
+    #                                udim[3]:u[udim[3]]}
+    #                       )
+    # advvbar = xr.DataArray(np.zeros((vN[1], vN[2], vN[3])),
+    #                        dims=vdim,
+    #                        coords={vdim[1]:v[vdim[1]], vdim[2]:v[vdim[2]],
+    #                                vdim[3]:v[vdim[3]]}
+    #                       )
+    # advwp = xr.DataArray(np.zeros((wN[0], wN[1]-1, wN[2], wN[3])),
+    #                      dims=wdim,
+    #                      coords={wdim[0]:w[wdim[0]], wdim[1]:w[wdim[1]][:-1],
+    #                              wdim[2]:w[wdim[2]], wdim[3]:w[wdim[3]]}
+    #                     )
+    # advup = xr.DataArray(np.zeros((uN[0], uN[1], uN[2], uN[3])),
+    #                      dims=udim,
+    #                      coords={udim[0]:u[udim[0]], udim[1]:u[udim[1]],
+    #                              udim[2]:u[udim[2]], udim[3]:u[udim[3]]}
+    #                     )
+    # advvp = xr.DataArray(np.zeros((vN[0], vN[1], vN[2], vN[3])),
+    #                      dims=vdim,
+    #                      coords={vdim[0]:v[vdim[0]], vdim[1]:v[vdim[1]],
+    #                              vdim[2]:v[vdim[2]], vdim[3]:v[vdim[3]]}
+    #                     )
+    # tctend = xr.DataArray(np.zeros((wN[0]-1, wN[1], wN[2], wN[3])),
+    #                       dims=wdim,
+    #                       coords={wdim[0]:w[wdim[0]][:-1], wdim[1]:w[wdim[1]],
+    #                               wdim[2]:w[wdim[2]], wdim[3]:w[wdim[3]]}
+    #                      )
+
+    wp = w - wbar
+    up = u - ubar
+    vp = v - vbar
+    tcp = tc - tcbar
+
+    advwbar = .5*(wbar+wbar.shift(s_rho=-1))[:-1] * (tcbar.diff(dim=wdim[1])
+                                                / zr.diff(dim=wdim[1])).values
+    advubar = ubar * grid.diff(tcbar,'X') / grid.diff(xr,'X').values
+    advvbar = vbar * grid.diff(tcbar,'Y') / grid.diff(yr,'Y').values
+    advwp = .5*(wp+wp.shift(s_rho=-1))[:,:-1] * (tcp.diff(dim=wdim[1])
+                                                / zr.diff(dim=wdim[1])).values
+    advup = up * grid.diff(tcp,'X') / grid.diff(xr,'X').values
+    advvp = vp * grid.diff(tcp,'Y') / grid.diff(yr,'Y').values
+    tctend = tc.diff(dim=wdim[0]) / tc.time.diff(dim=wdim[0])
+
+    advwbar = sig2z(advwbar, .5*(zr+zr.shift(s_rho=-1))[:-1].values, zi,
+                    dim=['z',wdim[-2],wdim[-1]],
+                    coord={'z':-zi, wdim[-2]:w[wdim[-2]],
+                           wdim[-1]:w[wdim[-1]]}
+                   )
+    advubar = sig2z(advubar, zu.values, zi, dim=['z',udim[-2],udim[-1]],
+                    coord={'z':-zi, udim[-2]:u[udim[-2]],
+                           udim[-1]:u[udim[-1]]}
+                   )
+    advvbar = sig2z(advvbar, zv.values, zi, dim=['z',vdim[-2],vdim[-1]],
+                    coord={'z':-zi, vdim[-2]:v[vdim[-2]],
+                           vdim[-1]:v[vdim[-1]]}
+                   )
+    advwp = sig2z(advwp, .5*(zr+zr.shift(s_rho=-1))[:-1].values, zi,
+                  dim=[wdim[0],'z',wdim[-2],wdim[-1]],
+                  coord={wdim[0]:w[wdim[0]], 'z':-zi,
+                         wdim[-2]:w[wdim[-2]], wdim[-1]:w[wdim[-1]]}
+                 )
+    advup = sig2z(advup, zu.values, zi, dim=[udim[0],'z',udim[-2],udim[-1]],
+                  coord={udim[0]:u[udim[0]], 'z':-zi,
+                         udim[-2]:u[udim[-2]], udim[-1]:u[udim[-1]]}
+                 )
+    advvp = sig2z(advvp, zv.values, zi, dim=[vdim[0],'z',vdim[-2],vdim[-1]],
+                  coord={vdim[0]:v[vdim[0]], 'z':-zi,
+                         vdim[-2]:v[vdim[-2]], vdim[-1]:v[vdim[-1]]}
+                 )
+    tctend = sig2z(tctend, zr.values, zi, dim=[wdim[0],'z',wdim[-2],wdim[-1]],
+                   coord={wdim[0]:w[wdim[0]][:-1], 'z':-zi,
+                          wdim[-2]:w[wdim[-2]], wdim[-1]:w[wdim[-1]]}
+                 )
+
+    return advwbar, advubar, advvbar, advwp, advup, advvp, tctend
